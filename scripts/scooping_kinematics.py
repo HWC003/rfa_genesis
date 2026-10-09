@@ -22,7 +22,7 @@ from trajectory_diagnostics import fit_pose
 
 ROOT = Path(__file__).resolve().parents[1]
 # Replay markers in world metres, written by feeding_mapping.py (crop/scale there). Only read here.
-TRAJ_CSV = ROOT / 'data/trajectory/gb_0017_gen_frame_c.csv'
+TRAJ_CSV = ROOT / 'data/trajectory/real_trajs/gb_0017_gen_frame_cropped.csv'
 # Chosen by `screen` (data/diagnostics/2026-09-23/screening/screen_selection/screen_summary.json).
 # The recording's orientation is unchanged; only the anchor moves.
 SELECTED_POINT = np.array([0.34, -0.13, 0.43])
@@ -47,6 +47,30 @@ def load_trajectory():
     if len(times) < 2 or not np.isfinite(markers).all() or not np.all(np.diff(times) > 0):
         raise ValueError(f'{TRAJ_CSV.name} needs >= 2 rows, finite positions and increasing times')
     return times, markers
+
+
+def load_joint_plan(path):
+    """Precomputed joint plan (e.g. data/trajectory/gen_trajs/*.npz): times (s) and q (N, 16), robot DOF order.
+
+    Also returns the world marker targets of the CSV with the same name (N, 9, 3), or None if there is none;
+    they are absolute world positions and are not re-anchored.
+    """
+    data = np.load(path)
+    times, q = data['times'], data['q']
+    if q.ndim != 2 or q.shape != (len(times), 16) or not np.isfinite(q).all() or not np.all(np.diff(times) > 0):
+        raise ValueError(f'{Path(path).name} needs times (N,) increasing and finite q (N, 16)')
+    markers = None
+    csv_path = Path(path).with_suffix('.csv')
+    if csv_path.exists():
+        global TRAJ_CSV
+        saved, TRAJ_CSV = TRAJ_CSV, csv_path
+        try:
+            mt, markers = load_trajectory()
+        finally:
+            TRAJ_CSV = saved
+        if len(mt) != len(times) or not np.allclose(mt, times):
+            raise ValueError(f'{csv_path.name} times differ from {Path(path).name}')
+    return times, q, markers
 
 
 def anchor_point(trajectory=None):
@@ -132,8 +156,12 @@ class ArmKinematics:
     Planning bounds inset the unchanged physical limits; they do not modify USD
     or simulation joint limits. The weak seed term selects a continuous solution
     in the redundant seventh DOF. Pose errors are checked separately.
+
+    continuity weights the pull toward the previous joints (seed). 0.012 instead
+    of the default 0.001 removes the 37 deg left-arm branch jump near 1.96 s of the
+    cropped scoop (data/diagnostics/2026-09-28/cropped_contact_correction).
     """
-    def __init__(self, side, margin=np.deg2rad(5)):
+    def __init__(self, side, margin=np.deg2rad(5), continuity=0.001):
         from pxr import UsdPhysics
         stage = Usd.Stage.Open(str(ROOT / 'assets/openarm_bimanual/openarm_spoon_w_o_markers.usd'))
         joints = {p.GetName(): UsdPhysics.Joint(p) for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)}
@@ -157,6 +185,7 @@ class ArmKinematics:
             lo.append(p.GetAttribute('physics:lowerLimit').Get())
             hi.append(p.GetAttribute('physics:upperLimit').Get())
         self.low, self.high, self.margin = np.deg2rad(lo), np.deg2rad(hi), margin
+        self.continuity = continuity
 
     def fk(self, q):
         T = self.base.copy()
@@ -179,7 +208,7 @@ class ArmKinematics:
         def residual(q):
             T, _ = self.fk(q)
             return np.r_[T[:3, 3] - pos, .2 * (Rotation.from_matrix(T[:3, :3]) * target.inv()).as_rotvec(),
-                         .001 * (q - seed), .02 * (q - (self.low + self.high) / 2) / (self.high - self.low)]
+                         self.continuity * (q - seed), .02 * (q - (self.low + self.high) / 2) / (self.high - self.low)]
 
         def jacobian(q):
             T, J = self.fk(q)
@@ -189,7 +218,7 @@ class ArmKinematics:
             K = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
             coeff = 1 / 12 if theta < 1e-5 else (1 - .5 * theta / np.tan(.5 * theta)) / theta**2
             inverse_left = np.eye(3) - .5 * K + coeff * K @ K
-            return np.vstack((J[:3], .2 * inverse_left @ J[3:], .001 * np.eye(7), np.diag(.02 / (self.high - self.low))))
+            return np.vstack((J[:3], .2 * inverse_left @ J[3:], self.continuity * np.eye(7), np.diag(.02 / (self.high - self.low))))
         sol = least_squares(residual, seed, jac=jacobian, bounds=(self.low + self.margin, self.high - self.margin),
                             max_nfev=80, ftol=1e-8, xtol=1e-8, gtol=1e-9)
         T, _ = self.fk(sol.x)

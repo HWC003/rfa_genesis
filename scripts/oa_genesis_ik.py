@@ -11,7 +11,7 @@ from genesis.utils.path_planning import RRTConnect
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 OPENARM_USD = ASSETS_DIR / "openarm_bimanual" / "openarm_spoon_w_o_markers.usd"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-TRAJ_CSV = DATA_DIR / "trajectories" / "green_bean0017.csv"
+TRAJ_CSV = DATA_DIR / "trajectory" / "real_trajs" / "green_bean0017.csv"
 
 # Table mesh + its existing pose put the tabletop at world Z = 0.30 m.
 # Left arm is on +Y. Center the bowl opening over the left side of the table.

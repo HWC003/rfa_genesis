@@ -25,7 +25,7 @@ parser.add_argument('--max-frames', type=int, help='Limit recorded frames for a 
 parser.add_argument('--no-liquid', action='store_true', help='Rigid-only comparison; changes physics')
 parser.add_argument('--backend', choices=['gpu', 'cpu'], default='gpu')
 parser.add_argument('--scooping-point', type=float, nargs=3, default=sk.SELECTED_POINT.tolist(),
-                    metavar=('X', 'Y', 'Z'), help='Where the first Bowl_center sample of gb_0017_gen_frame.csv is moved to (pure translation); '
+                    metavar=('X', 'Y', 'Z'), help='Where the first Bowl_center sample of scooping_kinematics.TRAJ_CSV is moved to (pure translation); '
                     'default is the screened placement')
 args = parser.parse_args()
 phase_timings = []

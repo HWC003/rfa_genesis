@@ -313,8 +313,8 @@ def marker_distance_stats(df, marker_names):
 
 def main():
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    input_csv = os.path.join(project_root, "data", "trajectory", "green_bean0017_cropped.csv")
-    output_csv = os.path.join(project_root, "data", "trajectory", "gb_0017_gen_frame_cropped.csv")
+    input_csv = os.path.join(project_root, "data", "trajectory", "real_trajs", "green_bean0017_cropped.csv")
+    output_csv = os.path.join(project_root, "data", "trajectory", "real_trajs", "gb_0017_gen_frame_cropped.csv")
 
     postprocess_csv(input_csv, output_csv)
     original_df = ReadCSV(input_csv)
