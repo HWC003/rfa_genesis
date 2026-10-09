@@ -1,2 +1,4 @@
 *.usda
 *.pyc
+*data/diagnostics/*
+*data/cache/*
