@@ -33,6 +33,10 @@ BOWL_AXIS_X = .1549                           # bowl axis x in the holder frame 
 RIM_CENTRE = np.array([.1549, .0191, 0])      # bowl opening centre at rim height, holder frame
 DISH_GX = np.arange(.135, .2071, .001)        # 1 mm dish grid along X_S
 DISH_GY = np.arange(-.021, .0211, .001)       # and Y_S
+# Settled food volume per 6 mm SPH particle (mL): pool volume in the bowl / particles, median over the >= 60 mL pools,
+# rho 960, mu 0.01 (2026-10-21 soybean_batch results/pool_match.json). Genesis' own particle volume (0.8 size^3 =
+# 0.1728 mL) is how the runner places --food-volume, not the volume the food fills once settled.
+SETTLED_PARTICLE_VOLUME_ML = 0.1275
 
 
 # ---------------------------------------------------------------- geometry ----
@@ -122,10 +126,17 @@ def spoon_bowl_contact(robot, left, right):
 
 
 class ScoopGeometry:
-    """Spoon dish and bowl measurements from the collision meshes (no physics)."""
+    """Spoon dish and bowl measurements from the collision meshes (no physics).
 
-    def __init__(self, asset=ASSET, surface_cache=SURFACE_CACHE):
+    Spoon poses R passed to the methods are the spoon frame {S}. For the v1 spoon {S} is the right wrist frame;
+    for another attachment pass spoon_tool ({S} in the wrist frame, scooping_scene.marker_templates()['spoon_tool'])
+    and give the methods R = wrist pose @ spoon_tool.
+    """
+
+    def __init__(self, asset=ASSET, surface_cache=SURFACE_CACHE, spoon_tool=None):
         self.meshes, self.holder_to_link = load_meshes(asset)
+        if spoon_tool is not None:                       # spoon mesh: wrist frame -> {S}
+            self.meshes['spoon'].apply_transform(np.linalg.inv(spoon_tool))
         self.verts = sample_vertices(self.meshes['spoon'])
         self.height = bowl_height_map(self.meshes['bowl'], surface_cache)
         self.gx, self.gy = DISH_GX, DISH_GY
@@ -285,11 +296,14 @@ class ScoopEvaluator:
     in the bowl at the first check with t >= 0. Success: run completed; the same pool particle IDs stay on
     the dish (centre <= 20 mm above the face) from t_end + 0.5 s to the end; the spoon's lowest point ends
     above the bowl's highest point; clearance >= 0 and bowl movement < 2 mm during the trajectory; peak
-    spoon-bowl contact < 10 N.
+    spoon-bowl contact < 10 N. The bowl-movement check is for a stationary bowl (bowl_fixed, the welded runs);
+    a bowl carried by the left arm moves by design and is not checked. summary()['failed_checks'] names the
+    checks that failed.
     """
 
-    def __init__(self, geom, n_particles, radius, t_end, hold, submerged_window=None):
+    def __init__(self, geom, n_particles, radius, t_end, hold, submerged_window=None, bowl_fixed=True):
         self.g, self.r, self.t_end, self.hold, self.sub = geom, radius, t_end, hold, submerged_window
+        self.bowl_fixed = bowl_fixed
         self.trk = Tracker(n_particles); self.n = n_particles
         self.pool = self.hold_ids = self.hold_ids10 = self.B_ref = None
         self.rows = []; self.peak_contact = 0.; self.last = None
@@ -324,7 +338,9 @@ class ScoopEvaluator:
         self.rows.append(row); self.last = (P, R, B)
         return row
 
-    def summary(self, particle_volume_mL=None):
+    def summary(self, particle_volume_mL=None, settled_volume_mL=None):
+        """particle_volume_mL: Genesis' particle volume; settled_volume_mL: the settled volume per particle, which
+        retained_volume_mL and initial_volume_mL use when given (else Genesis', as before)."""
         rows = self.rows
         rr = [x for x in rows if x['t'] >= 0]
         sub = [x for x in rows if self.sub and self.sub[0] <= x['t'] <= self.sub[1]]
@@ -356,8 +372,18 @@ class ScoopEvaluator:
                  final_spoon_above_bowl_mm=(last['spoon_lowest_z'] - last['bowl_highest_z']) * 1e3)
         if particle_volume_mL is not None:
             s['particle_volume_mL'] = particle_volume_mL
-            s['retained_volume_mL'] = s['retained_same_ids'] * particle_volume_mL
-        s['success'] = bool(s['completed'] and s['retained_same_ids'] > 0 and s['final_spoon_above_bowl_mm'] > 0
-                            and s['min_clearance_mm'] >= 0 and s['max_bowl_translation_mm'] < 2
-                            and s['peak_rigid_contact_N'] < 10)
+            v = particle_volume_mL if settled_volume_mL is None else settled_volume_mL
+            s['retained_volume_mL'] = s['retained_same_ids'] * v
+            s['initial_volume_mL'] = s['initial_in_bowl'] * v
+            if settled_volume_mL is not None:
+                s['settled_particle_volume_mL'] = settled_volume_mL
+                s['retained_volume_nominal_mL'] = s['retained_same_ids'] * particle_volume_mL
+        checks = dict(completed=s['completed'], kept_food=s['retained_same_ids'] > 0,
+                      spoon_above_bowl=s['final_spoon_above_bowl_mm'] > 0, clearance=s['min_clearance_mm'] >= 0,
+                      contact_below_10N=s['peak_rigid_contact_N'] < 10)
+        if self.bowl_fixed:
+            checks['bowl_still'] = s['max_bowl_translation_mm'] < 2
+        s['bowl_fixed'] = self.bowl_fixed
+        s['failed_checks'] = [k for k, ok in checks.items() if not ok]
+        s['success'] = not s['failed_checks']
         return s

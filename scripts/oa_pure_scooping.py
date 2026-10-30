@@ -15,6 +15,11 @@ Trajectory sources:
       --joint-plan data/trajectory/gen_trajs/gen_scoop_traj_34deg.npz --weld-bowl
     as validated in data/diagnostics/2026-10-02 and 2026-10-06 (there: SPH 3 mm, --particle-size 0.003).
 
+Spoon (--spoon): v1 is the original spoon in line with joint 7; v2 is the CAD attachment perpendicular to joint 7
+(spoon_mount_v2.usd). The v2 markers sit where v1's do relative to the dish, so any marker CSV runs unchanged with
+--spoon v2 (IK puts the v2 dish where the v1 dish was). Joint plans are v1 joints: for v2, give the plan's marker
+CSV as --trajectory instead, e.g. --trajectory data/trajectory/gen_trajs/gen_scoop_traj_34deg.csv --weld-bowl.
+
 Scene construction: scooping_scene.py. Food/scoop metrics and the success test: scooping_metrics.py
 (--evaluate, written to --diagnostics as metrics.csv, scoop_summary.json and particle snapshots).
 """
@@ -48,11 +53,19 @@ parser.add_argument('--continuity-weight', type=float, default=0.012,
 parser.add_argument('--trim-after-exit', action='store_true',
                     help='End the replay once the spoon has lifted clear of the bowl (scooping_kinematics.task_frames); '
                     'needed for recordings that then carry the spoon out of reach')
+parser.add_argument('--spoon', choices=sorted(ss.SPOONS), default='v1',
+                    help='Spoon attachment: v1 original (in line with joint 7), v2 CAD attachment perpendicular to joint 7, '
+                         'v3 = v2 3.14 mm further from the joint-7 axis')
 parser.add_argument('--weld-bowl', action='store_true',
                     help='Weld the left wrist (bowl) to the world at the first pose: a stationary bowl')
-parser.add_argument('--sph-mu', type=float, default=0.005, help='SPH liquid viscosity mu (Genesis default 0.005)')
+parser.add_argument('--sph-mu', type=float, default=0.01, help='SPH liquid viscosity mu (Genesis default 0.005; 0.01 matches the soybean pudding scoops, 2026-10-26 sph_param_validation)')
+parser.add_argument('--sph-rho', type=float, default=1000.0, help='SPH liquid rest density (kg/m^3, Genesis default 1000)')
+parser.add_argument('--sph-gamma', type=float, default=0.01, help='SPH liquid surface tension / cohesion (Genesis default 0.01)')
 parser.add_argument('--particle-size', type=float, default=0.006, help='SPH particle size (m)')
 parser.add_argument('--food-size', type=float, default=0.06, help='Edge of the food cube (m)')
+parser.add_argument('--food-volume', type=float,
+                    help='Food volume (mL), overrides --food-size: particles = volume / (0.8 particle_size^3) (Genesis particle '
+                         'volume, so the food mass is density x volume), in a near-cubic box of whole particles')
 parser.add_argument('--food-gap', type=float, default=0.03, help='Height of the food cube bottom above the rim centre (m)')
 parser.add_argument('--food-vis', choices=['recon', 'particle'], default='recon', help='Food rendering')
 parser.add_argument('--settle-time', type=float, default=2.0,
@@ -60,6 +73,9 @@ parser.add_argument('--settle-time', type=float, default=2.0,
 parser.add_argument('--hold', type=float, default=0.0, help='Seconds the final pose is held after the replay (s)')
 parser.add_argument('--evaluate', action='store_true',
                     help='Food/scoop metrics every 20 ms and the success test (needs --diagnostics and liquid)')
+parser.add_argument('--gate-clearance-mm', type=float, default=-2.0,
+                    help='With --evaluate, abort when the spoon-bowl clearance (axial, inflated on the steep wall) drops '
+                         'below this (mm); e.g. -30 for 0 mm clearance trajectories. The 30 N contact gate always applies')
 parser.add_argument('--submerged-window', type=float, nargs=2, metavar=('T0', 'T1'),
                     help='Trajectory times when the dish is submerged, for submerged hollow contact (7.4 8.0 for gen_scoop_traj_34deg)')
 parser.add_argument('--render-final', action='store_true',
@@ -78,6 +94,9 @@ if (args.evaluate or args.render_final) and not args.diagnostics:
     parser.error('--evaluate and --render-final need --diagnostics')
 if args.evaluate and args.no_liquid:
     parser.error('--evaluate needs liquid')
+if args.joint_plan and args.spoon != 'v1':
+    parser.error(f'--joint-plan files hold v1 joints; for --spoon {args.spoon} pass the plan\'s marker CSV as --trajectory '
+                 f'(e.g. {args.joint_plan.with_suffix(".csv")}) so IK plans the {args.spoon} spoon')
 phase_timings = []
 def report_phase(name, started):
     elapsed = time.perf_counter() - started
@@ -85,12 +104,13 @@ def report_phase(name, started):
     print(f'[Timing] {name}: {elapsed:.3f} s', flush=True)
 
 DT = ss.DT
-OPENARM_USD = ss.robot_usd(args.show_markers)
+OPENARM_USD = ss.robot_usd(args.show_markers, args.spoon)
 SCOOPING_POINT = np.array(args.scooping_point)
 if args.diagnostics:
     args.diagnostics.mkdir(parents=True, exist_ok=True)
 templates = ss.marker_templates(OPENARM_USD)
 spoon_locals, bowl_locals = templates['spoon'], templates['bowl']
+SPOON_TOOL = templates['spoon_tool']           # spoon frame {S} in the right wrist (identity for v1)
 left_arm, left_finger, right_arm = ss.LEFT_ARM, ss.LEFT_FINGER, ss.RIGHT_ARM
 kins = (sk.ArmKinematics('left', continuity=args.continuity_weight),
         sk.ArmKinematics('right', continuity=args.continuity_weight))
@@ -159,9 +179,10 @@ planned_residual = np.concatenate([planned_markers - trajectory, np.zeros_like(t
 # Food cube starts food_gap above the rim of the bowl as held at the first replay pose, as in oa_full_sim.
 start_wrist, _ = kins[0].fk(joint_plan[0, left_arm])
 rim_center = start_wrist[:3, 3] + start_wrist[:3, :3] @ templates['rim_center_local']
+food_box = (args.food_size,) * 3 if args.food_volume is None else ss.food_box(args.food_volume, args.particle_size)
 food = None if args.no_liquid else dict(
-    pos=rim_center + [0, 0, args.food_gap + args.food_size / 2], size=(args.food_size,) * 3,
-    particle_size=args.particle_size, mu=args.sph_mu, vis_mode=args.food_vis)
+    pos=rim_center + [0, 0, args.food_gap + food_box[2] / 2], size=food_box,
+    particle_size=args.particle_size, mu=args.sph_mu, rho=args.sph_rho, gamma=args.sph_gamma, vis_mode=args.food_vis)
 built = ss.build_scene(OPENARM_USD, joint_plan[0], food=food, backend=args.backend, headless=args.headless,
                        weld_bowl=args.weld_bowl, camera=args.render_final)
 scene, openarm, liquid, cam = built['scene'], built['robot'], built['food'], built['cam']
@@ -182,12 +203,13 @@ peak_contact = (0.0, 0.0)   # (force N, sim time s) of the largest spoon-bowl co
 # ------------------------------------------------------------------ evaluation --
 evaluator, metrics_file, snaps = None, None, {}
 if args.evaluate:
-    geom = sm.ScoopGeometry()
+    geom = sm.ScoopGeometry(OPENARM_USD, spoon_tool=SPOON_TOOL)
     holder_to_link = templates['holder_to_link']
     particle_volume_mL = scene.sim.sph_solver.particle_volume * 1e6
     evaluator = sm.ScoopEvaluator(geom, liquid.n_particles, args.particle_size / 2,
                                   t_end=float(trajectory_times[-1] - trajectory_times[0]), hold=args.hold,
-                                  submerged_window=args.submerged_window)
+                                  submerged_window=args.submerged_window, bowl_fixed=args.weld_bowl)
+    settled_volume_mL = sm.SETTLED_PARTICLE_VOLUME_ML * (args.particle_size / 0.006) ** 3
     aborted = None
 
 
@@ -202,7 +224,7 @@ def evaluate(trajectory_time):
     if not np.isfinite(P).all():
         aborted = 'non-finite particle positions'; return False
     vel = liquid.get_particles_vel().detach().cpu().numpy().reshape(-1, 3)
-    R, B = sm.pose(right_gripper), bowl_pose()
+    R, B = sm.pose(right_gripper) @ SPOON_TOOL, bowl_pose()
     pool_was_set = evaluator.pool is not None
     row = evaluator.update(trajectory_time, P, vel, R, B, spoon_bowl_contact()[1])
     if metrics_file is None:
@@ -216,7 +238,7 @@ def evaluate(trajectory_time):
             ss.render_bowl(cam, B, args.diagnostics / 'pool_t0.png')
     if sim_step_count % 50 == 0:
         snaps[f'P_{trajectory_time:.3f}'] = P.astype(np.float32); snaps[f'R_{trajectory_time:.3f}'] = R; snaps[f'B_{trajectory_time:.3f}'] = B
-    if trajectory_time > 0 and (row['contact_peak_N'] > 30 or row['clearance_mm'] < -2):
+    if trajectory_time > 0 and (row['contact_peak_N'] > 30 or row['clearance_mm'] < args.gate_clearance_mm):
         aborted = 'rigid force/clearance safety gate'; return False
     return True
 
@@ -253,10 +275,11 @@ if args.diagnostics:
                              task_end_s=float(trajectory_times[-1]), headless=args.headless, liquid=not args.no_liquid,
                              dt=scene.sim.dt, substeps=scene.sim.substeps, pos_tol_m=sk.POS_TOL,
                              plan=plan_metrics, playback="precomputed joint spline, one target per physics step",
-                             robot_usd=OPENARM_USD.name, continuity_weight=None if args.joint_plan else args.continuity_weight,
+                             robot_usd=OPENARM_USD.name, spoon=args.spoon, continuity_weight=None if args.joint_plan else args.continuity_weight,
                              trim_after_exit=args.trim_after_exit,
                              food=None if args.no_liquid else dict(particle_size=args.particle_size, sph_mu=args.sph_mu,
-                                                                   size=args.food_size, gap_above_rim=args.food_gap),
+                                                                   sph_rho=args.sph_rho, sph_gamma=args.sph_gamma, size=list(food_box),
+                                                                   volume_mL=args.food_volume, gap_above_rim=args.food_gap),
                              bowl="left wrist welded to the world at the first pose" if args.weld_bowl
                              else "rigid geometry of the left wrist link (no weld)",
                              settle_time_s=args.settle_time, hold_s=args.hold,
@@ -361,10 +384,12 @@ print(f"Peak spoon-bowl contact: {peak_contact[0]:.1f} N at replay t={peak_conta
 if evaluator:
     if aborted:
         print(f'ABORTED: {aborted}', flush=True)
-    summary = dict(trajectory=str(TRAJ_SOURCE), joint_plan=bool(args.joint_plan), weld_bowl=args.weld_bowl,
-                   particle_size_m=args.particle_size, sph_mu=args.sph_mu, food_size_m=args.food_size,
+    summary = dict(trajectory=str(TRAJ_SOURCE), joint_plan=bool(args.joint_plan), spoon=args.spoon, weld_bowl=args.weld_bowl,
+                   particle_size_m=args.particle_size, sph_mu=args.sph_mu, sph_rho=args.sph_rho, sph_gamma=args.sph_gamma,
+                   food_size_m=args.food_size,
+                   food_box_m=list(food_box), food_volume_mL=args.food_volume,
                    food_gap_m=args.food_gap, settle_s=args.settle_time, hold_s=args.hold, aborted=aborted,
-                   **evaluator.summary(particle_volume_mL), peak_contact_every_step_N=peak_contact[0])
+                   **evaluator.summary(particle_volume_mL, settled_volume_mL), peak_contact_every_step_N=peak_contact[0])
     if metrics_file:
         metrics_file[0].close()
     P, R, B = evaluator.last
@@ -373,16 +398,18 @@ if evaluator:
                         spoon_through=evaluator.trk.spoon_through, bowl_through=evaluator.trk.bowl_through,
                         embedded_ever=evaluator.trk.spoon_embedded_ever)
     (args.diagnostics / 'scoop_summary.json').write_text(json.dumps(summary, indent=2, default=lambda x: x.item() if hasattr(x, 'item') else str(x)))
-    print('[Evaluate]', json.dumps({k: summary[k] for k in ('success', 'retained_same_ids', 'retained_volume_mL', 'initial_in_bowl',
+    print('[Evaluate]', json.dumps({k: summary[k] for k in ('success', 'failed_checks', 'retained_same_ids', 'retained_volume_mL',
+                                                             'initial_in_bowl', 'initial_volume_mL',
                                                              'final_gap_med_mm', 'final_food_contact_fraction', 'spoon_through',
                                                              'min_clearance_mm')}), flush=True)
     evaluator = None            # the viewer loop below keeps stepping; metrics.csv is closed
 if args.render_final:
-    ss.render_spoon(cam, sm.pose(right_gripper), args.diagnostics / 'final.png')
+    ss.render_spoon(cam, sm.pose(right_gripper) @ SPOON_TOOL, args.diagnostics / 'final.png')
 if recorder:
     recorder.finish()
     atexit.unregister(recorder.finish)
     print(f'Diagnostics saved to {args.diagnostics.resolve()}', flush=True)
+    recorder = None             # files are closed; the viewer loop below keeps stepping without recording
 
 # Hold the final (lifted-clear) pose.
 while not args.headless and scene.viewer.is_alive():

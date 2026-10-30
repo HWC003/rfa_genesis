@@ -42,9 +42,16 @@ BOWL_MARKER_COLUMNS = {'Bowl_center': 'Bowl_center', 'Bowl_rim_1': 'Bowl_rim_4',
                        'Bowl_rim_2': 'Bowl_rim_3', 'Bowl_rim_3': 'Bowl_rim_2', 'Bowl_rim_4': 'Bowl_rim_1'}
 
 
-def robot_usd(show_markers=False):
-    return ASSETS_DIR / 'openarm_bimanual' / ('openarm_spoon_bowl_w_markers.usd' if show_markers
-                                              else 'openarm_spoon_bowl_w_o_markers.usd')
+# Spoon attachment -> robot USD suffix. v1: original spoon in line with joint 7. v2: CAD attachment
+# (oa_spoon_attachment_sim_v2.STL) perpendicular to joint 7, base 40.5 mm below the joint-7 axis (spoon_mount_v2.usd;
+# built and compared in data/diagnostics/2026-10-09/spoon_mount_v2). The v2 markers sit where v1's do relative to
+# the dish, so the same marker CSV puts the v2 dish where the v1 dish was.
+SPOONS = dict(v1='', v2='_mount_v2', v3='_mount_v3')   # v3: v2 attachment 3.14 mm further from the j7 axis
+
+
+def robot_usd(show_markers=False, spoon='v1'):
+    name = 'openarm_spoon_bowl_w_markers' if show_markers else 'openarm_spoon_bowl_w_o_markers'
+    return ASSETS_DIR / 'openarm_bimanual' / f'{name}{SPOONS[spoon]}.usd'
 
 
 def marker_templates(usd):
@@ -52,7 +59,9 @@ def marker_templates(usd):
 
     Spoon site Xforms are identity -- the marker sphere nested under each carries the offset -- so the child
     prim is resolved, not the site. Returns spoon markers (right wrist frame), bowl markers (left wrist frame),
-    bowl markers (holder frame), holder_to_link and the rim centre in the left wrist frame.
+    bowl markers (holder frame), holder_to_link, the rim centre in the left wrist frame, and spoon_tool: the spoon
+    frame {S} of scooping_metrics in the right wrist frame (sites/spoon_tool_frame; identity for the v1 spoon,
+    whose {S} is the wrist frame itself).
     """
     stage = Usd.Stage.Open(str(usd)); xforms = UsdGeom.XformCache()
 
@@ -63,6 +72,10 @@ def marker_templates(usd):
 
     holder_to_link = np.array(xforms.GetLocalToWorldTransform(stage.GetPrimAtPath(HOLDER_PATH))
                               * xforms.GetLocalToWorldTransform(stage.GetPrimAtPath(sk.LEFT)).GetInverse()).T
+    tool = stage.GetPrimAtPath(f'{sk.RIGHT}/sites/spoon_tool_frame')
+    spoon_tool = (np.array(xforms.GetLocalToWorldTransform(tool)
+                           * xforms.GetLocalToWorldTransform(stage.GetPrimAtPath(sk.RIGHT)).GetInverse()).T
+                  if tool.IsValid() else np.eye(4))
     if list(BOWL_MARKER_COLUMNS.values()) + list(SPOON_MARKER_COLUMNS.values()) != sk.BOWL_NAMES + sk.SPOON_NAMES:
         raise ValueError("Marker order differs from the planner's CSV order")
     return dict(
@@ -70,13 +83,14 @@ def marker_templates(usd):
         bowl=local_points(sk.LEFT, [f'{HOLDER_PATH}/sites/{s}' for s in BOWL_MARKER_COLUMNS]),
         bowl_holder=local_points(HOLDER_PATH, [f'{HOLDER_PATH}/sites/{s}' for s in BOWL_MARKER_COLUMNS]),
         holder_to_link=holder_to_link,
-        rim_center_local=holder_to_link[:3, :3] @ RIM_CENTRE + holder_to_link[:3, 3])
+        rim_center_local=holder_to_link[:3, :3] @ RIM_CENTRE + holder_to_link[:3, 3],
+        spoon_tool=spoon_tool)
 
 
 def build_scene(usd, q0, food=None, backend='gpu', headless=False, weld_bowl=False, camera=False):
     """Plane, robot (fixed base, gravity-compensated), table and optional SPH food; robot set to q0.
 
-    food: None or dict(pos, size, particle_size, mu, vis_mode). weld_bowl welds the left wrist (bowl) to the
+    food: None or dict(pos, size, particle_size, mu, rho (default 1000), gamma (default 0.01), vis_mode). weld_bowl welds the left wrist (bowl) to the
     world at q0 (stationary bowl, as the diagnostics' v9 runs). camera adds an offscreen camera for
     render_spoon / render_bowl. Returns a dict: scene, robot, food, left, right, plane, cam.
     """
@@ -101,7 +115,8 @@ def build_scene(usd, q0, food=None, backend='gpu', headless=False, weld_bowl=Fal
     scene.add_entity(gs.morphs.USD(file=str(TABLE_USD), pos=(0.6, 0, 0), euler=(0, 0, 90), fixed=True), name='Table')
     liquid = None
     if food is not None:
-        liquid = scene.add_entity(material=gs.materials.SPH.Liquid(mu=food['mu']),
+        liquid = scene.add_entity(material=gs.materials.SPH.Liquid(mu=food['mu'], rho=food.get('rho', 1000.0),
+                                                                   gamma=food.get('gamma', 0.01)),
                                   morph=gs.morphs.Box(pos=tuple(food['pos']), size=tuple(food['size'])),
                                   surface=gs.surfaces.Default(color=FOOD_COLOR, vis_mode=food.get('vis_mode', 'recon')))
     cam = scene.add_camera(res=(1280, 960), pos=(0.6, -0.3, 0.7), lookat=(0.35, -0.1, 0.45), fov=30,
@@ -115,6 +130,27 @@ def build_scene(usd, q0, food=None, backend='gpu', headless=False, weld_bowl=Fal
     if weld_bowl:
         scene.sim.rigid_solver.add_weld_constraint(plane.base_link.idx, left.idx)
     return dict(scene=scene, robot=robot, food=liquid, left=left, right=right, plane=plane, cam=cam)
+
+
+def food_box(volume_mL, particle_size):
+    """Box (m) holding the particle count closest to volume_mL, at Genesis's particle volume 0.8 particle_size^3.
+
+    Genesis fills a box with round(side / particle_size) particles per side, so sides that are whole multiples of the
+    particle size give exactly that count. The most cubic (a, b, c) with a <= b <= c <= 2a is chosen; the tallest
+    side is vertical.
+    """
+    n = volume_mL * 1e-6 / (0.8 * particle_size ** 3)
+    best = None
+    for a in range(1, 40):
+        for b in range(a, 2 * a + 1):
+            c = max(b, round(n / (a * b)))
+            if c > 2 * a:
+                continue
+            key = (abs(a * b * c - n) / n, c - a)
+            if best is None or key < best[0]:
+                best = (key, (a, b, c))
+    a, b, c = best[1]
+    return (a * particle_size, b * particle_size, c * particle_size)
 
 
 def bowl_downhill(B):

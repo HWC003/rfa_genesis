@@ -6,7 +6,7 @@ import genesis as gs
 from genesis.ext.pyrender.overlay import ImGuiOverlayPlugin
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
-OPENARM_USD = ASSETS_DIR / "openarm_bimanual" / "openarm_spoon_bowl_w_o_markers.usd"
+OPENARM_USD = ASSETS_DIR / "openarm_bimanual" / "openarm_spoon_bowl_w_o_markers_mount_v2.usd"
 
 gs.init(backend=gs.gpu)
 
