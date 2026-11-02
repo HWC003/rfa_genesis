@@ -50,12 +50,15 @@ parser.add_argument('--joint-plan', type=Path,
                     'same name supplies the marker targets for recording')
 parser.add_argument('--continuity-weight', type=float, default=0.012,
                     help='IK pull toward the previous joints (scooping_kinematics default 0.001; 0.012 validated 2026-09-28)')
+parser.add_argument('--joint-margin-deg', type=float, default=5.0,
+                    help='Planner keeps every joint this far inside its limit (deg, scooping_kinematics default 5)')
 parser.add_argument('--trim-after-exit', action='store_true',
                     help='End the replay once the spoon has lifted clear of the bowl (scooping_kinematics.task_frames); '
                     'needed for recordings that then carry the spoon out of reach')
 parser.add_argument('--spoon', choices=sorted(ss.SPOONS), default='v1',
                     help='Spoon attachment: v1 original (in line with joint 7), v2 CAD attachment perpendicular to joint 7, '
-                         'v3 = v2 3.14 mm further from the joint-7 axis')
+                         'v3 = v2 3.14 mm further from the joint-7 axis, v4 / v5 = v3 turned +90 / -90 deg about the '
+                         'spoon axis (dish face inward / outward; 2026-10-30 spoon_mount_v4)')
 parser.add_argument('--weld-bowl', action='store_true',
                     help='Weld the left wrist (bowl) to the world at the first pose: a stationary bowl')
 parser.add_argument('--sph-mu', type=float, default=0.01, help='SPH liquid viscosity mu (Genesis default 0.005; 0.01 matches the soybean pudding scoops, 2026-10-26 sph_param_validation)')
@@ -112,8 +115,8 @@ templates = ss.marker_templates(OPENARM_USD)
 spoon_locals, bowl_locals = templates['spoon'], templates['bowl']
 SPOON_TOOL = templates['spoon_tool']           # spoon frame {S} in the right wrist (identity for v1)
 left_arm, left_finger, right_arm = ss.LEFT_ARM, ss.LEFT_FINGER, ss.RIGHT_ARM
-kins = (sk.ArmKinematics('left', continuity=args.continuity_weight),
-        sk.ArmKinematics('right', continuity=args.continuity_weight))
+kins = (sk.ArmKinematics('left', margin=np.deg2rad(args.joint_margin_deg), continuity=args.continuity_weight),
+        sk.ArmKinematics('right', margin=np.deg2rad(args.joint_margin_deg), continuity=args.continuity_weight))
 
 # ------------------------------------------------------------------ trajectory --
 phase_start = time.perf_counter()
@@ -275,7 +278,7 @@ if args.diagnostics:
                              task_end_s=float(trajectory_times[-1]), headless=args.headless, liquid=not args.no_liquid,
                              dt=scene.sim.dt, substeps=scene.sim.substeps, pos_tol_m=sk.POS_TOL,
                              plan=plan_metrics, playback="precomputed joint spline, one target per physics step",
-                             robot_usd=OPENARM_USD.name, spoon=args.spoon, continuity_weight=None if args.joint_plan else args.continuity_weight,
+                             robot_usd=OPENARM_USD.name, spoon=args.spoon, joint_margin_deg=args.joint_margin_deg, continuity_weight=None if args.joint_plan else args.continuity_weight,
                              trim_after_exit=args.trim_after_exit,
                              food=None if args.no_liquid else dict(particle_size=args.particle_size, sph_mu=args.sph_mu,
                                                                    sph_rho=args.sph_rho, sph_gamma=args.sph_gamma, size=list(food_box),

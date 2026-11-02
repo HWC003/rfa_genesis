@@ -46,7 +46,9 @@ BOWL_MARKER_COLUMNS = {'Bowl_center': 'Bowl_center', 'Bowl_rim_1': 'Bowl_rim_4',
 # (oa_spoon_attachment_sim_v2.STL) perpendicular to joint 7, base 40.5 mm below the joint-7 axis (spoon_mount_v2.usd;
 # built and compared in data/diagnostics/2026-10-09/spoon_mount_v2). The v2 markers sit where v1's do relative to
 # the dish, so the same marker CSV puts the v2 dish where the v1 dish was.
-SPOONS = dict(v1='', v2='_mount_v2', v3='_mount_v3')   # v3: v2 attachment 3.14 mm further from the j7 axis
+SPOONS = dict(v1='', v2='_mount_v2', v3='_mount_v3',   # v3: v2 attachment 3.14 mm further from the j7 axis
+              v4='_mount_v4',                     # v4: v3 turned +90 deg about the wrist Z axis, dish face inward
+              v5='_mount_v5')                     # v5: v3 turned -90 deg (v4 + 180 deg), dish face outward
 
 
 def robot_usd(show_markers=False, spoon='v1'):
