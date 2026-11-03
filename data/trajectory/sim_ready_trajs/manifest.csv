@@ -1,0 +1,22 @@
+recording,configuration,file,scooping_point,yaw_deg,initial_food_ml,food_volume_arg,real_scooped_ml,sim_scooped_ml,robot_joint_file
+0001,cal,sb_0001_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,106.3,144.12,12.5,9.7,sb_traj_0001.csv
+0002,cal,sb_0002_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,105.2,142.56,10.4,7.1,sb_traj_0002.csv
+0003,calwall,sb_0003_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,105.2,142.56,12.5,12.4,sb_traj_0003.csv
+0004,cal,sb_0004_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,105.2,142.56,11.5,12.8,sb_traj_0004.csv
+0005,cal,sb_0005_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,105.2,142.56,11.5,12.9,sb_traj_0005.csv
+0006,cal,sb_0006_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,83.3,112.84,8.3,8.4,sb_traj_0006.csv
+0007,calwall,sb_0007_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,83.3,112.84,9.4,11.3,sb_traj_0007.csv
+0008,calwall,sb_0008_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,83.3,112.84,10.4,10.1,sb_traj_0008.csv
+0009,calwall,sb_0009_calwall_x1.6_yaw200.csv,0.22 0.00 0.44,200,83.3,112.84,15.6,11.2,sb_traj_0009.csv
+0010,cal,sb_0010_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,83.3,112.84,10.4,11.9,sb_traj_0010.csv
+0011,calwall,sb_0011_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,62.5,84.67,11.5,10.8,sb_traj_0011.csv
+0012,cal,sb_0012_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,62.5,84.67,7.3,7.9,sb_traj_0012.csv
+0013,calwall,sb_0013_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,62.5,84.67,11.5,11.1,sb_traj_0013.csv
+0014,cal,sb_0014_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,62.5,84.67,13.5,13.0,sb_traj_0014.csv
+0016,cal,sb_0016_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,41.7,56.51,6.3,4.7,sb_traj_0016.csv
+0017,cal,sb_0017_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,41.7,56.51,10.4,10.5,sb_traj_0017.csv
+0018,cal,sb_0018_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,41.7,56.51,11.5,9.3,sb_traj_0018.csv
+0019,calwall,sb_0019_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,41.7,56.51,11.5,8.9,sb_traj_0019.csv
+0021,cal,sb_0021_cal_x1.6_yaw180.csv,0.22 -0.04 0.44,180,20.8,28.17,3.1,2.0,sb_traj_0021.csv
+0023,calwall,sb_0023_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,20.8,28.17,10.4,3.3,sb_traj_0023.csv
+0024,calwall,sb_0024_calwall_x1.6_yaw180.csv,0.22 -0.04 0.44,180,20.8,28.17,11.5,4.0,sb_traj_0024.csv

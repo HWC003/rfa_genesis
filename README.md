@@ -18,22 +18,23 @@ food/scoop metrics in `scripts/scooping_metrics.py`.
 
 ### Typical commands
 Run from the repository root. The soybean trajectories are in
-`data/diagnostics/2026-10-21/soybean_batch/mapped/sb_<take>_<cal|calwall>_x1.6_yaw180.csv`.
+[`data/trajectory/sim_ready_trajs/`](data/trajectory/sim_ready_trajs/README.md); its `manifest.csv` gives each
+recording's file, `--scooping-point` and `--food-volume`.
 
 Viewer, rigid only (no food):
 ```bash
 python scripts/oa_pure_scooping.py --spoon v3 \
-  --trajectory data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0017_cal_x1.6_yaw180.csv \
+  --trajectory data/trajectory/sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv \
   --scooping-point 0.22 -0.04 0.44 --no-liquid --hold 1
 ```
 
 Viewer with food and scoop evaluation (the validated soybean pudding settings):
 ```bash
 GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_pure_scooping.py --spoon v3 \
-  --trajectory data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0017_cal_x1.6_yaw180.csv \
+  --trajectory data/trajectory/sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv \
   --scooping-point 0.22 -0.04 0.44 --hold 2 --food-volume 56.51 \
   --sph-rho 960 --sph-mu 0.01 --sph-gamma 0.01 --food-gap 0.030 \
-  --gate-clearance-mm -30 --evaluate --diagnostics data/diagnostics/<session>/sim/<run>
+  --gate-clearance-mm -30 --evaluate --diagnostics sim_runs/0017
 ```
 
 Headless jam check (rigid, CPU), as the batch scripts run it:

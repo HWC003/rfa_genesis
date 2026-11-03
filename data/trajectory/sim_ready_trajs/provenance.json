@@ -1,0 +1,131 @@
+{
+ "note": "marker CSVs copied unchanged; already turned (yaw_deg) and slowed x1.6. food_volume_arg = round(V / 0.1275) x 0.1728 mL; sim_scooped_ml = 2026-10-26 sph_param_validation set A (mu 0.01, gamma 0.01, 6 mm) when it used the same configuration",
+ "files": [
+  {
+   "recording": "0001",
+   "file": "sb_0001_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0001_cal_x1.6_yaw180.csv",
+   "sha256": "8b6f1db4c9f827a458460f4dd5ec6a412958671cb90904c055525c2fbc4f4bf1"
+  },
+  {
+   "recording": "0002",
+   "file": "sb_0002_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0002_cal_x1.6_yaw180.csv",
+   "sha256": "90e85ed1b07a4ae7161b69ce68902431fde2606703948e4f0c46f110ae63e0fe"
+  },
+  {
+   "recording": "0003",
+   "file": "sb_0003_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0003_calwall_x1.6_yaw180.csv",
+   "sha256": "e1292c51b33904b6d2e14d502c8361cb599b26f2e0c529767cc25fb91e1b49f1"
+  },
+  {
+   "recording": "0004",
+   "file": "sb_0004_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0004_cal_x1.6_yaw180.csv",
+   "sha256": "3809cddc709a90b34297f571675bd103319008c5e2307a52165a2f96497e4033"
+  },
+  {
+   "recording": "0005",
+   "file": "sb_0005_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0005_cal_x1.6_yaw180.csv",
+   "sha256": "e749bb06c3491c91a291509b5c2075d78ed47fca59692efe6082d43931eeefaf"
+  },
+  {
+   "recording": "0006",
+   "file": "sb_0006_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0006_cal_x1.6_yaw180.csv",
+   "sha256": "838f0588b3b43c83ede96b4c6c07bebf9a4e741f7fbc79885d49659b728e4cd2"
+  },
+  {
+   "recording": "0007",
+   "file": "sb_0007_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0007_calwall_x1.6_yaw180.csv",
+   "sha256": "b84c498eab07dc10259bab85667f59d4b339f11a6c05464c30b3b22636b49d5f"
+  },
+  {
+   "recording": "0008",
+   "file": "sb_0008_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0008_calwall_x1.6_yaw180.csv",
+   "sha256": "e0dd439d96e9ac095ac549910aec482f466dec7d68d3cc6822ebf42d18ecb672"
+  },
+  {
+   "recording": "0009",
+   "file": "sb_0009_calwall_x1.6_yaw200.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0009_calwall_x1.6_yaw200.csv",
+   "sha256": "258b4d8de7d5f0f134b399ee2bdc7a07834013fc6e1ac825be639fcdd0ec3bd2"
+  },
+  {
+   "recording": "0010",
+   "file": "sb_0010_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0010_cal_x1.6_yaw180.csv",
+   "sha256": "7d0f8eace42c6716ba2128dd26ce55d2cccd66d968400d67fa4ae529332d2cc5"
+  },
+  {
+   "recording": "0011",
+   "file": "sb_0011_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0011_calwall_x1.6_yaw180.csv",
+   "sha256": "5b0d8575d60e4d25bcc1fb10e44d36dc50ba5120ee5bd1601eaee43f7754e031"
+  },
+  {
+   "recording": "0012",
+   "file": "sb_0012_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0012_cal_x1.6_yaw180.csv",
+   "sha256": "252faf1781ce04943e551f3c47368b26bd7e845fdd51ef47daf5b4ed135bfcbb"
+  },
+  {
+   "recording": "0013",
+   "file": "sb_0013_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0013_calwall_x1.6_yaw180.csv",
+   "sha256": "856630aaf7219d78077d30d6d7a0c3e9deedd1dca4c96ce24b1a9711417843a9"
+  },
+  {
+   "recording": "0014",
+   "file": "sb_0014_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0014_cal_x1.6_yaw180.csv",
+   "sha256": "e6b86144e7a6962128c1684b21957b3f93add484ce1709f8cd2cfac050007ef6"
+  },
+  {
+   "recording": "0016",
+   "file": "sb_0016_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0016_cal_x1.6_yaw180.csv",
+   "sha256": "8ceb4426f7125856827db956655553edf090c5cbfb675eca075f8f149a2d9415"
+  },
+  {
+   "recording": "0017",
+   "file": "sb_0017_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0017_cal_x1.6_yaw180.csv",
+   "sha256": "99799a63bbd7657d78d32b9bfd2a79673902e62c31c052ba49cc5cc560adad78"
+  },
+  {
+   "recording": "0018",
+   "file": "sb_0018_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0018_cal_x1.6_yaw180.csv",
+   "sha256": "28f9a5a824cb07ee16956fad603285ed5f6001238bc3f33ce788c9076e54a8a2"
+  },
+  {
+   "recording": "0019",
+   "file": "sb_0019_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0019_calwall_x1.6_yaw180.csv",
+   "sha256": "1bf1b12429a038f52cdf128fec369dd165dcce548bc21f7d93e86a82a53d8185"
+  },
+  {
+   "recording": "0021",
+   "file": "sb_0021_cal_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0021_cal_x1.6_yaw180.csv",
+   "sha256": "a4f84c510dcda070dfba1d3d6089e00f05c894d2df66ca22cb989455d00f01fa"
+  },
+  {
+   "recording": "0023",
+   "file": "sb_0023_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0023_calwall_x1.6_yaw180.csv",
+   "sha256": "ae4202cc19fa56a0b5ba3903f82942232ca5b8da062b7a7149569f4389b7ec77"
+  },
+  {
+   "recording": "0024",
+   "file": "sb_0024_calwall_x1.6_yaw180.csv",
+   "source": "data/diagnostics/2026-10-21/soybean_batch/mapped/sb_0024_calwall_x1.6_yaw180.csv",
+   "sha256": "5c840316c0a933c9e045d22e0186493d59e1a1bba338e816afae60350dbfda6d"
+  }
+ ]
+}

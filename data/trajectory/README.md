@@ -4,6 +4,8 @@
 |---|---|
 | `real_trajs/` | Recorded (Qualisys) feeding demonstrations and their direct mappings to the robot world |
 | `gen_trajs/` | Generated (designed / planned) trajectories |
+| [`sb_robot_trajs/`](sb_robot_trajs/README.md) | Selected successful soybean replays: timed joint commands for both arms, one file per successful recording |
+| [`sim_ready_trajs/`](sim_ready_trajs/README.md) | The same 21 soybean recordings as marker trajectories for `oa_pure_scooping.py`, with the runner values per recording (copied from the git-ignored diagnostics) |
 | `old_tb_traj/` | Older corrective trajectories, kept for reference |
 
 ## real_trajs/

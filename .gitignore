@@ -2,3 +2,4 @@
 *.pyc
 *data/diagnostics/*
 *data/cache/*
+sim_runs/
