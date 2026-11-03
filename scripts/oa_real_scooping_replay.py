@@ -1,9 +1,12 @@
 """
 Replay a soybean CSV through the two arm action controllers.
 
---preview-approach displays a virtual zero-to-start motion in MoveIt/RViz.
+Both modes go through a fixed intermediate START_POSE before the CSV start:
+    measured (normally all zeros) -> START_POSE -> CSV first row -> CSV replay
+
+--preview-approach displays a virtual zero -> START_POSE -> CSV-start motion in MoveIt/RViz.
 It does not send action goals or move hardware.
---execute moves from measured joint positions to the CSV start, then replays it.
+--execute moves from measured joint positions to START_POSE, then to the CSV start, then replays it.
 """
 import argparse
 import csv
@@ -21,6 +24,22 @@ from rclpy.action import ActionClient
 from control_msgs.action import FollowJointTrajectory
 from control_msgs.msg import JointTolerance
 from action_msgs.msg import GoalStatus
+
+# Intermediate start pose (rad), joints 1-7, reached before moving to the CSV start.
+START_POSE = {
+    "left": (0.785, 0.0, 0.0, 1.570, 0.0, 0.0, 0.0),
+    "right": (-0.785, 0.0, 0.0, 1.570, 0.0, 0.0, 0.0),
+}
+
+
+def start_pose_positions():
+    """START_POSE as {joint_name: angle} for both arms."""
+    return {
+        f"openarm_{side}_joint{i}": angle
+        for side, angles in START_POSE.items()
+        for i, angle in enumerate(angles, start=1)
+    }
+
 
 class ScoopingReplay(Node):
     def __init__(self):
@@ -142,24 +161,32 @@ class ScoopingReplay(Node):
 
         return goal
 
-    def build_zero_approach(self, replay_goal, duration_s=10.0):
-        """Virtual zero-to-start approach used by the RViz preview."""
-        zeros = dict.fromkeys(replay_goal.trajectory.joint_names, 0.0)
-        return self.build_approach(replay_goal, zeros, duration_s)
-
     def build_approach(self, replay_goal, current_positions, duration_s=10.0):
-        """Sample a quintic joint spline from measured angles to CSV start at 200 Hz.
+        """Quintic move from the given angles to the CSV start."""
+        names = list(replay_goal.trajectory.joint_names)
+        return self.build_move(
+            names, current_positions,
+            dict(zip(names, replay_goal.trajectory.points[0].positions)), duration_s,
+        )
+
+    def build_start_pose_move(self, side, current_positions, duration_s=10.0):
+        """Quintic move for one arm from the given angles to START_POSE."""
+        names = [f"openarm_{side}_joint{i}" for i in range(1, 8)]
+        return self.build_move(names, current_positions, start_pose_positions(), duration_s)
+
+    def build_move(self, joint_names, start_positions, target_positions, duration_s=10.0):
+        """Sample a quintic joint spline from start to target angles at 200 Hz.
 
         Both endpoint velocities and accelerations are zero. This is joint-space
         interpolation; it does not perform collision checking or motion planning.
         """
         if not math.isfinite(duration_s) or duration_s <= 0:
-            raise ValueError("Approach duration must be finite and positive")
+            raise ValueError("Move duration must be finite and positive")
 
         goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = list(replay_goal.trajectory.joint_names)
-        starts = [current_positions[name] for name in goal.trajectory.joint_names]
-        targets = replay_goal.trajectory.points[0].positions
+        goal.trajectory.joint_names = list(joint_names)
+        starts = [start_positions[name] for name in goal.trajectory.joint_names]
+        targets = [target_positions[name] for name in goal.trajectory.joint_names]
         changes = [target - start for start, target in zip(starts, targets)]
         steps = math.ceil(duration_s / 0.005)
 
@@ -179,6 +206,32 @@ class ScoopingReplay(Node):
             goal.trajectory.points.append(point)
 
         return goal
+
+    @staticmethod
+    def chain_moves(first, second):
+        """Append `second` after `first` in one goal (for the preview); drops the duplicate joining point."""
+        offset = Duration.from_msg(first.trajectory.points[-1].time_from_start).nanoseconds
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = list(first.trajectory.joint_names)
+        goal.trajectory.points = list(first.trajectory.points)
+        for p in second.trajectory.points[1:]:
+            point = JointTrajectoryPoint()
+            point.positions = list(p.positions)
+            point.velocities = list(p.velocities)
+            point.accelerations = list(p.accelerations)
+            point.time_from_start = Duration(
+                nanoseconds=offset + Duration.from_msg(p.time_from_start).nanoseconds
+            ).to_msg()
+            goal.trajectory.points.append(point)
+        return goal
+
+    @staticmethod
+    def set_move_tolerances(goal):
+        goal.goal_tolerance = [
+            JointTolerance(name=name, position=0.03)
+            for name in goal.trajectory.joint_names
+        ]
+        goal.goal_time_tolerance = Duration(seconds=2.0).to_msg()
 
     def execute_pair(self, left_goal, right_goal, label):
         """Schedule both arms together; wait for BOTH successful action results.
@@ -260,6 +313,15 @@ class ScoopingReplay(Node):
 
     def wait_for_start_pose(self, goals, tolerance=0.03, timeout_s=5.0):
         """Require fresh measured angles near the CSV start before replay."""
+        targets = {
+            name: target
+            for goal in goals
+            for name, target in zip(goal.trajectory.joint_names, goal.trajectory.points[0].positions)
+        }
+        self.wait_for_pose(targets, "CSV start pose", tolerance, timeout_s)
+
+    def wait_for_pose(self, targets, label, tolerance=0.03, timeout_s=5.0):
+        """Require fresh measured angles within `tolerance` of `targets`; returns them."""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             # Discard cached feedback and require new samples for this check.
@@ -267,16 +329,11 @@ class ScoopingReplay(Node):
             positions = self.read_current_positions(
                 timeout_s=min(1.0, max(0.01, deadline - time.monotonic()))
             )
-            error = max(
-                abs(positions[name] - target)
-                for goal in goals
-                for name, target in zip(goal.trajectory.joint_names,
-                                        goal.trajectory.points[0].positions)
-            )
+            error = max(abs(positions[name] - target) for name, target in targets.items())
             if error <= tolerance:
-                self.get_logger().info(f"Both arms at start pose; max error {error:.4f} rad")
-                return
-        raise RuntimeError("Arms did not reach the CSV start pose; replay not sent")
+                self.get_logger().info(f"Both arms at {label}; max error {error:.4f} rad")
+                return positions
+        raise RuntimeError(f"Arms did not reach the {label}; next motion not sent")
 
     def preview_approach(self, left_approach, right_approach):
         """Publish the two arms as ONE planned trajectory for RViz animation only."""
@@ -345,19 +402,25 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--preview-approach", action="store_true",
-        help="Animate zero-to-start in MoveIt/RViz only; sends no action goals",
+        help="Animate zero -> START_POSE -> CSV start in MoveIt/RViz only; sends no action goals",
     )
     mode.add_argument(
         "--execute", action="store_true",
-        help="Send approach then CSV goals to the connected arm controllers",
+        help="Send START_POSE move, approach, then CSV goals to the connected arm controllers",
+    )
+    parser.add_argument(
+        "--start-pose-duration", type=float, default=10.0,
+        help="Seconds for the move from the current joints to START_POSE (default: 10)",
     )
     parser.add_argument(
         "--approach-duration", type=float, default=10.0,
-        help="Seconds for approach to the starting pose (default: 10)",
+        help="Seconds for the move from START_POSE to the CSV start (default: 10)",
     )
     args = parser.parse_args()
-    if not math.isfinite(args.approach_duration) or args.approach_duration <= 0:
-        parser.error("--approach-duration must be finite and positive")
+    for flag in ("start_pose_duration", "approach_duration"):
+        value = getattr(args, flag)
+        if not math.isfinite(value) or value <= 0:
+            parser.error(f"--{flag.replace('_', '-')} must be finite and positive")
 
     rclpy.init()
     node = ScoopingReplay()
@@ -378,8 +441,16 @@ def main():
         )
 
         if args.preview_approach:
-            left_approach = node.build_zero_approach(left_goal, args.approach_duration)
-            right_approach = node.build_zero_approach(right_goal, args.approach_duration)
+            zeros = dict.fromkeys(start_pose_positions(), 0.0)
+            start_pose = start_pose_positions()
+            left_approach = node.chain_moves(
+                node.build_start_pose_move("left", zeros, args.start_pose_duration),
+                node.build_approach(left_goal, start_pose, args.approach_duration),
+            )
+            right_approach = node.chain_moves(
+                node.build_start_pose_move("right", zeros, args.start_pose_duration),
+                node.build_approach(right_goal, start_pose, args.approach_duration),
+            )
             node.preview_approach(left_approach, right_approach)
             return
 
@@ -420,22 +491,27 @@ def main():
         node.get_logger().info(f"Right starting angles: {right_start}")
 
         if args.execute:
-            # Re-read immediately before building the approach, rather than
-            # assuming the real robot is at the preview's virtual zero pose.
+            # 1. Current joints (normally all zeros) -> START_POSE. Re-read right before
+            # building the move rather than assuming the robot is at zero.
             node.current_positions.clear()
             current_positions = node.read_current_positions()
+            node.get_logger().info(f"Start pose: left {START_POSE['left']}, right {START_POSE['right']}")
+            left_home = node.build_start_pose_move("left", current_positions, args.start_pose_duration)
+            right_home = node.build_start_pose_move("right", current_positions, args.start_pose_duration)
+            for goal in (left_home, right_home):
+                node.set_move_tolerances(goal)
+            node.execute_pair(left_home, right_home, "Start pose")
+            current_positions = node.wait_for_pose(start_pose_positions(), "start pose")
+
+            # 2. START_POSE (as measured) -> CSV first row.
             left_approach = node.build_approach(left_goal, current_positions, args.approach_duration)
             right_approach = node.build_approach(right_goal, current_positions, args.approach_duration)
             for goal in (left_approach, right_approach):
-                goal.goal_tolerance = [
-                    JointTolerance(name=name, position=0.03)
-                    for name in goal.trajectory.joint_names
-                ]
-                goal.goal_time_tolerance = Duration(seconds=2.0).to_msg()
+                node.set_move_tolerances(goal)
             node.execute_pair(left_approach, right_approach, "Approach")
             node.wait_for_start_pose((left_goal, right_goal))
             node.execute_pair(left_goal, right_goal, "Replay")
-            node.get_logger().info("Approach and replay completed")
+            node.get_logger().info("Start pose, approach and replay completed")
         
     except KeyboardInterrupt:
         pass
