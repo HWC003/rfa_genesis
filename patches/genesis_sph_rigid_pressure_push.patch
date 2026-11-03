@@ -1,0 +1,34 @@
+--- a/engine/couplers/legacy_coupler.py
++++ b/engine/couplers/legacy_coupler.py
+@@ -1,3 +1,4 @@
++import os
+ from typing import TYPE_CHECKING
+ 
+ import numpy as np
+@@ -50,6 +51,12 @@
+         self._fem_mpm = self.fem_solver.is_active and self.mpm_solver.is_active and self.options.fem_mpm
+         self._fem_sph = self.fem_solver.is_active and self.sph_solver.is_active and self.options.fem_sph
+ 
++        # LOCAL DIAGNOSTIC PATCH (rfa_genesis 2026-10-06): GS_SPH_RIGID_PRESSURE_PUSH=0 disables the SPH pressure
++        # push on non-fixed links in _func_collide_with_rigid_geom_robust. Runtime field, so cached kernels honour
++        # it. Unset or any other value keeps the upstream behaviour.
++        self.sph_rigid_pressure_push = qd.field(gs.qd_int, shape=())
++        self.sph_rigid_pressure_push[None] = 0 if os.environ.get("GS_SPH_RIGID_PRESSURE_PUSH", "1") == "0" else 1
++
+         if (self._rigid_mpm or self._rigid_sph or self._rigid_pbd or self._rigid_fem) and any(
+             geom.needs_coup for geom in self.rigid_solver.geoms
+         ):
+@@ -233,7 +240,12 @@
+         # ringing forever, pumped by the acoustic pressure fluctuations of the fluid.
+         link_idx = geoms_info.link_idx[geom_idx]
+         I_l = [link_idx, batch_idx] if qd.static(self.rigid_solver._options.batch_links_info) else link_idx
+-        if signed_dist < self.sph_solver._support_radius and pressure > 0 and not links_info.is_fixed[I_l]:
++        if (
++            self.sph_rigid_pressure_push[None] == 1
++            and signed_dist < self.sph_solver._support_radius
++            and pressure > 0
++            and not links_info.is_fixed[I_l]
++        ):
+             pressure_force = (
+                 -2.0
+                 * pressure

@@ -98,8 +98,39 @@ than 50 ms.
 | `--backend {gpu,cpu}` | `gpu` | Physics backend. Rigid-only jam checks run on CPU; food runs use the GPU (run at most 3 at once) |
 
 ### Environment variable
-`GS_SPH_RIGID_PRESSURE_PUSH=0` turns off the SPH pressure push on moving rigid bodies. This is a local patch in
-Genesis's `legacy_coupler.py`, and must be re-applied after a Genesis update. Every food run here uses it.
+`GS_SPH_RIGID_PRESSURE_PUSH=0` turns off the SPH pressure push on moving rigid bodies. Every food run here uses it.
+
+Stock Genesis ignores this variable: it only works after you apply the local patch in
+[`patches/genesis_sph_rigid_pressure_push.patch`](patches/genesis_sph_rigid_pressure_push.patch). Without the patch
+the run completes without error, but the push stays on (airgap between food and spoon). Apply it again on every
+new machine and after every `pip install`/upgrade of `genesis-world`.
+
+**What the patch does** (`genesis/engine/couplers/legacy_coupler.py`, made against genesis-world 1.3.3):
+- `LegacyCoupler.build()` creates a 0-d runtime field `sph_rigid_pressure_push` from the variable:
+  `0` turns the push off; unset or any other value keeps the upstream behaviour.
+- In `_func_collide_with_rigid_geom_robust`, the static-pressure push on non-fixed links runs only when the field
+  is `1`.
+- It is a runtime field rather than a Python constant, so cached compiled kernels still pick up the setting.
+
+**Apply** (inside the `genesis` conda env, from this package's directory):
+```bash
+GENESIS_DIR=$(python -c "import genesis, os; print(os.path.dirname(genesis.__file__))")
+cp "$GENESIS_DIR/engine/couplers/legacy_coupler.py" "$GENESIS_DIR/engine/couplers/legacy_coupler.py.orig"
+patch -p1 -d "$GENESIS_DIR" < patches/genesis_sph_rigid_pressure_push.patch
+```
+If `patch` reports a rejected hunk, the Genesis version has changed the file. Make the same two edits by hand,
+then regenerate the patch.
+
+**Check** that the patch is there and reads the variable:
+```bash
+grep -c sph_rigid_pressure_push "$GENESIS_DIR/engine/couplers/legacy_coupler.py"   # expect 3
+```
+After `scene.build()`, `scene.sim._coupler.sph_rigid_pressure_push[None]` should be `0` when the run sets
+`GS_SPH_RIGID_PRESSURE_PUSH=0`.
+
+**Viewer setup:** don't export `MUJOCO_GL=egl` globally (e.g. in `~/.bashrc`). It switches pyglet to headless EGL
+and the Genesis viewer fails with `Unable to initialize an OpenGL 3+ context`. Set it only for the commands that
+need headless MuJoCo rendering.
 
 ### Output in `--diagnostics`
 
