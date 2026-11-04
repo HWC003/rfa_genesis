@@ -226,9 +226,9 @@ class ScoopingReplay(Node):
         return goal
 
     @staticmethod
-    def set_move_tolerances(goal):
+    def set_move_tolerances(goal, tolerance=0.03):
         goal.goal_tolerance = [
-            JointTolerance(name=name, position=0.03)
+            JointTolerance(name=name, position=tolerance)
             for name in goal.trajectory.joint_names
         ]
         goal.goal_time_tolerance = Duration(seconds=2.0).to_msg()
@@ -309,6 +309,16 @@ class ScoopingReplay(Node):
                     break
                 rclpy.spin_once(self, timeout_sec=0.05)
             self.get_logger().error(f"{label}: stopped; cancellation requested for accepted goals")
+            # Show which joints were off target (last /joint_states sample vs final point).
+            for goal in goals.values():
+                for name, target in zip(goal.trajectory.joint_names,
+                                        goal.trajectory.points[-1].positions):
+                    if name in self.current_positions:
+                        measured = self.current_positions[name]
+                        self.get_logger().error(
+                            f"  {name}: target {target:+.4f}, measured {measured:+.4f}, "
+                            f"error {math.degrees(measured - target):+.2f} deg"
+                        )
             raise
 
     def wait_for_start_pose(self, goals, tolerance=0.03, timeout_s=5.0):
@@ -416,8 +426,12 @@ def main():
         "--approach-duration", type=float, default=10.0,
         help="Seconds for the move from START_POSE to the CSV start (default: 10)",
     )
+    parser.add_argument(
+        "--move-tolerance", type=float, default=0.03,
+        help="Final position tolerance (rad) for the START_POSE and approach moves (default: 0.03)",
+    )
     args = parser.parse_args()
-    for flag in ("start_pose_duration", "approach_duration"):
+    for flag in ("start_pose_duration", "approach_duration", "move_tolerance"):
         value = getattr(args, flag)
         if not math.isfinite(value) or value <= 0:
             parser.error(f"--{flag.replace('_', '-')} must be finite and positive")
@@ -499,17 +513,19 @@ def main():
             left_home = node.build_start_pose_move("left", current_positions, args.start_pose_duration)
             right_home = node.build_start_pose_move("right", current_positions, args.start_pose_duration)
             for goal in (left_home, right_home):
-                node.set_move_tolerances(goal)
+                node.set_move_tolerances(goal, args.move_tolerance)
             node.execute_pair(left_home, right_home, "Start pose")
-            current_positions = node.wait_for_pose(start_pose_positions(), "start pose")
+            current_positions = node.wait_for_pose(
+                start_pose_positions(), "start pose", args.move_tolerance
+            )
 
             # 2. START_POSE (as measured) -> CSV first row.
             left_approach = node.build_approach(left_goal, current_positions, args.approach_duration)
             right_approach = node.build_approach(right_goal, current_positions, args.approach_duration)
             for goal in (left_approach, right_approach):
-                node.set_move_tolerances(goal)
+                node.set_move_tolerances(goal, args.move_tolerance)
             node.execute_pair(left_approach, right_approach, "Approach")
-            node.wait_for_start_pose((left_goal, right_goal))
+            node.wait_for_start_pose((left_goal, right_goal), args.move_tolerance)
             node.execute_pair(left_goal, right_goal, "Replay")
             node.get_logger().info("Start pose, approach and replay completed")
         
