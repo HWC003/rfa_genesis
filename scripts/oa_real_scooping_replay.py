@@ -317,8 +317,8 @@ class ScoopingReplay(Node):
     def open_left_gripper(self):
         self.move_left_gripper(GRIPPER_OPEN)
 
-    def close_left_gripper(self, position=GRIPPER_CLOSED):
-        self.move_left_gripper(position)
+    def close_left_gripper(self):
+        self.move_left_gripper(GRIPPER_CLOSED)
 
     @staticmethod
     def chain_moves(first, second):
