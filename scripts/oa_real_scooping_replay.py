@@ -8,23 +8,41 @@ Both modes go through a fixed intermediate START_POSE before the CSV start:
 It does not send action goals or move hardware.
 --execute: both arms -> START_POSE; right arm -> CSV start; wait 2 s; left gripper
 quick open, hold 3 s, quick close; left arm -> CSV start; both arms replay the CSV together.
+
+Smooth start: the joint CSVs start mid-motion (up to ~6 rad/s). The first --blend-window s (default 0.3) are
+retimed over --blend-duration s (default 0.7) with a quintic time scaling (trajectory_smoothing.py): same
+joint path, starting from rest. --blend-window 0 replays the CSV unchanged.
+
+Payload: /left_payload_attached (std_msgs/Bool, transient local) is published False before the gripper opens
+and True after it closes on the bowl, so the feeding bringup's gravity compensation carries the bowl.
+
+Recording: from the scoop start (time 0 of the replay) to 1 s after its end, /joint_states is saved to
+--record-dir/<csv stem>_<date_time>/measured.csv next to commanded.csv (the trajectory actually sent).
+Both use the CSV's column names; time_from_start_s is relative to the replay start.
 """
 import argparse
 import csv
+from datetime import datetime
 from pathlib import Path
 import time
-from sensor_msgs.msg import JointState 
+
+import numpy as np
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 
 import math
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
 from trajectory_msgs.msg import JointTrajectoryPoint
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from rclpy.time import Time
 from rclpy.action import ActionClient
 from control_msgs.action import FollowJointTrajectory
 from control_msgs.msg import JointTolerance
 from action_msgs.msg import GoalStatus
+
+from trajectory_smoothing import smooth_start, peak_velocity
 
 # Intermediate start pose (rad), joints 1-7, reached before moving to the CSV start.
 START_POSE = {
@@ -34,6 +52,9 @@ START_POSE = {
 
 GRIPPER_OPEN = 0.785    # rad, from openarm_bowl_grasp.yaml
 GRIPPER_CLOSED = 0.0
+
+ARM_JOINTS = [f"openarm_{side}_joint{i}" for side in ("left", "right") for i in range(1, 8)]
+RECORD_DIR = Path(__file__).resolve().parent.parent / "real_runs"
 
 
 def start_pose_positions():
@@ -77,10 +98,45 @@ class ScoopingReplay(Node):
             qos_profile_sensor_data
         )
 
+        # Bowl payload for the feeding bringup's gravity compensation (latched, as xarm_compat publishes it).
+        self.payload_pub = self.create_publisher(
+            Bool, '/left_payload_attached',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE),
+        )
+
+        # /joint_states recording: rows of (time from replay start, 14 positions, 14 velocities, 14 efforts).
+        self.recording = False
+        self.record_start_ns = 0
+        self.recorded = []
+
+    def set_payload(self, attached):
+        self.payload_pub.publish(Bool(data=bool(attached)))
+        self.get_logger().info(f"/left_payload_attached -> {bool(attached)}")
+
     def joint_state_callback(self, msg):
         for name, position in zip(msg.name, msg.position):
             self.current_positions[name] = position
             self.joint_received_at[name] = time.monotonic()
+        if self.recording:
+            index = {name: i for i, name in enumerate(msg.name)}
+            if all(name in index for name in ARM_JOINTS):
+                stamp = Time.from_msg(msg.header.stamp).nanoseconds or self.get_clock().now().nanoseconds
+                if stamp < self.record_start_ns:
+                    return          # goals sent but the scoop has not started yet
+                def column(values):
+                    return [values[index[n]] if len(values) == len(msg.name) else float('nan') for n in ARM_JOINTS]
+                self.recorded.append([(stamp - self.record_start_ns) / 1e9] + column(msg.position)
+                                     + column(msg.velocity) + column(msg.effort))
+
+    def save_recording(self, run_dir):
+        """Write the recorded /joint_states to run_dir/measured.csv."""
+        header = (["time_from_start_s"] + ARM_JOINTS + [f"velocity_{n}" for n in ARM_JOINTS]
+                  + [f"effort_{n}" for n in ARM_JOINTS])
+        with (run_dir / "measured.csv").open("w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(header)
+            writer.writerows(self.recorded)
+        self.get_logger().info(f"Saved {len(self.recorded)} /joint_states samples to {run_dir / 'measured.csv'}")
 
     def read_current_positions(self, timeout_s=5.0):
         required_names = [
@@ -133,6 +189,26 @@ class ScoopingReplay(Node):
         )
 
         return rows
+
+    def smooth_rows(self, rows, window, duration):
+        """Retime the first `window` s of the CSV to start from rest (trajectory_smoothing.smooth_start)."""
+        times = np.array([float(row["time_from_start_s"]) for row in rows])
+        q = np.array([[float(row[name]) for name in ARM_JOINTS] for row in rows])
+        new_times, new_q = smooth_start(times, q, window, duration)
+        if window > 0:
+            self.get_logger().info(
+                f"Smooth start: first {window:.3f} s retimed over {duration:.3f} s; peak joint speed "
+                f"{peak_velocity(times, q):.2f} -> {peak_velocity(new_times, new_q):.2f} rad/s; "
+                f"replay {times[-1]:.2f} -> {new_times[-1]:.2f} s"
+            )
+        return [dict(time_from_start_s=t, **dict(zip(ARM_JOINTS, joints))) for t, joints in zip(new_times, new_q)]
+
+    @staticmethod
+    def save_commanded(rows, run_dir):
+        with (run_dir / "commanded.csv").open("w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=["time_from_start_s"] + ARM_JOINTS)
+            writer.writeheader()
+            writer.writerows(rows)
 
     def build_goal(self, side, rows):
         goal = FollowJointTrajectory.Goal()
@@ -270,9 +346,9 @@ class ScoopingReplay(Node):
         ]
         goal.goal_time_tolerance = Duration(seconds=2.0).to_msg()
 
-    def execute_pair(self, left_goal, right_goal, label):
+    def execute_pair(self, left_goal, right_goal, label, record=False):
         """Schedule both arms together; wait for BOTH successful action results."""
-        self.execute_goals({"left": left_goal, "right": right_goal}, label)
+        self.execute_goals({"left": left_goal, "right": right_goal}, label, record)
 
     def execute_single(self, side, goal, label):
         """Run one arm's goal and wait for its successful result."""
@@ -284,11 +360,12 @@ class ScoopingReplay(Node):
         while rclpy.ok() and time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=0.05)
 
-    def execute_goals(self, goals, label):
+    def execute_goals(self, goals, label, record=False):
         """Schedule the given arm goals together; wait for all successful results.
 
         Two controllers are not atomic. Rejection, timeout, interruption, or an
         arm failure triggers best-effort cancellation of all accepted goals.
+        record: save /joint_states from now on, timed from the scheduled start (stopped by the caller).
         """
         all_clients = {"left": self.left_client, "right": self.right_client}
         clients = {side: all_clients[side] for side in goals}
@@ -296,6 +373,10 @@ class ScoopingReplay(Node):
         stopping = False
         start_delay = 3.0
         start = self.get_clock().now() + Duration(seconds=start_delay)
+        if record:
+            self.record_start_ns = start.nanoseconds
+            self.recorded = []
+            self.recording = True
 
         def on_response(side, future):
             if future.exception() is None:
@@ -481,6 +562,18 @@ def main():
         "--move-tolerance", type=float, default=0.03,
         help="Final position tolerance (rad) for the START_POSE and approach moves (default: 0.03)",
     )
+    parser.add_argument(
+        "--blend-window", type=float, default=0.3,
+        help="Seconds at the CSV start retimed to start from rest; 0 = replay the CSV unchanged (default: 0.3)",
+    )
+    parser.add_argument(
+        "--blend-duration", type=float, default=0.7,
+        help="Seconds the blend window is stretched to, at most 2.5 x --blend-window (default: 0.7)",
+    )
+    parser.add_argument(
+        "--record-dir", type=Path, default=RECORD_DIR,
+        help=f"Where the run folder (commanded.csv, measured.csv) is written (default: {RECORD_DIR})",
+    )
     args = parser.parse_args()
     for flag in ("start_pose_duration", "approach_duration", "move_tolerance"):
         value = getattr(args, flag)
@@ -493,7 +586,7 @@ def main():
     try:
         if not args.preview_approach:
             node.check_connections()
-        rows = node.load_trajectory(args.trajectory)
+        rows = node.smooth_rows(node.load_trajectory(args.trajectory), args.blend_window, args.blend_duration)
 
         left_goal = node.build_goal("left", rows)
         right_goal = node.build_goal("right", rows)
@@ -577,10 +670,13 @@ def main():
             node.wait_for_start_pose((right_goal,), args.move_tolerance)
             node.hold(2.0)
 
-            # 3. Left gripper: quick open, hold open 3 s, quick close.
+            # 3. Left gripper: quick open, hold open 3 s, quick close. The payload feed-forward is
+            # dropped before the fingers open and switched on once they close on the bowl.
+            node.set_payload(False)
             node.move_left_gripper(GRIPPER_OPEN, duration_s=0.5)
             node.hold(3.0)
             node.move_left_gripper(GRIPPER_CLOSED, duration_s=0.5)
+            node.set_payload(True)
 
             # 4. Left arm only: START_POSE -> CSV first row (from fresh measurements).
             node.current_positions.clear()
@@ -591,7 +687,15 @@ def main():
 
             # 5. Both arms at the CSV start -> replay together.
             node.wait_for_start_pose((left_goal, right_goal), args.move_tolerance)
-            node.execute_pair(left_goal, right_goal, "Replay")
+            run_dir = args.record_dir / f"{args.trajectory.stem}_{datetime.now():%Y%m%d_%H%M%S}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            node.save_commanded(rows, run_dir)
+            try:
+                node.execute_pair(left_goal, right_goal, "Replay", record=True)
+                node.hold(1.0)              # keep recording while the arms settle
+            finally:
+                node.recording = False
+                node.save_recording(run_dir)   # also after a failed or interrupted replay
             node.get_logger().info("Start pose, approaches, gripper and replay completed")
         
     except KeyboardInterrupt:
