@@ -1,6 +1,6 @@
 """Copy the simulation inputs of the selected soybean replays out of data/diagnostics (which git ignores).
 
-One marker CSV per recording in ../sb_robot_trajs/manifest.csv, in the same configuration (cal / calwall), placement
+One marker CSV per recording in ../sb_robot_trajs/v1/manifest.csv, in the same configuration (cal / calwall), placement
 and turn: data/diagnostics/2026-10-21/soybean_batch/mapped/sb_<take>_<configuration>_x1.6_yaw<yaw>.csv, copied
 byte for byte. Writes manifest.csv (runner values per recording) and provenance.json (SHA-256 of every source).
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 DEST = Path(__file__).resolve().parents[1]
 ROOT = DEST.parents[2]
-ROBOT = ROOT / 'data/trajectory/sb_robot_trajs/manifest.csv'
+ROBOT = ROOT / 'data/trajectory/sb_robot_trajs/v1/manifest.csv'
 STATE = ROOT / 'data/trajectory/real_trajs/181026_soybean_state.csv'
 MAPPED = ROOT / 'data/diagnostics/2026-10-21/soybean_batch/mapped'
 VALIDATION = ROOT / 'data/diagnostics/2026-10-26/sph_param_validation/results/validation.csv'

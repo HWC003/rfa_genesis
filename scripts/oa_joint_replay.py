@@ -1,4 +1,4 @@
-"""Replay a recorded joint-angle CSV (data/trajectory/sb_robot_trajs/sb_traj_XXXX.csv) in Genesis.
+"""Replay a recorded joint-angle CSV (data/trajectory/sb_robot_trajs/v1|v2/sb_traj_XXXX.csv) in Genesis.
 
 No IK, no markers: the 14 arm joints are interpolated onto the 4 ms physics step and streamed as position
 targets. Same scene as oa_pure_scooping.py (scooping_scene.build_scene, spoon v3 by default, SPH food placed above
@@ -6,7 +6,7 @@ the bowl at the first pose). The food volume comes from data/trajectory/sim_read
 The start is smoothed as on the real robot (oa_real_scooping_replay.py, trajectory_smoothing.py); --blend-window 0
 replays the CSV unchanged.
 
-  GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_joint_replay.py data/trajectory/sb_robot_trajs/sb_traj_0017.csv
+  GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_joint_replay.py data/trajectory/sb_robot_trajs/v1/sb_traj_0017.csv
 """
 import argparse
 import csv

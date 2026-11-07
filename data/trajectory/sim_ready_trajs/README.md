@@ -19,7 +19,7 @@ these copies let any checkout run the simulation.
   | `food_volume_arg` | `--food-volume` that gives the real starting food amount (`initial_food_ml`) in the simulation |
   | `real_scooped_ml` | the human scoop, weighed |
   | `sim_scooped_ml` | the simulated scoop with μ 0.01, γ 0.01, 6 mm (2026-10-26 validation) |
-  | `robot_joint_file` | the matching robot joint trajectory in `../sb_robot_trajs` |
+  | `robot_joint_file` | the matching robot joint trajectory in `../sb_robot_trajs/v1` |
 - [`provenance.json`](provenance.json): source path and SHA-256 of every file.
 - [`tools/export.py`](tools/export.py): regenerates the folder (needs the diagnostics; standard library only).
 
