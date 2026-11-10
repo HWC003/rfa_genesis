@@ -89,4 +89,13 @@ details are in that session's README. It re-plans from the same `sim_ready_trajs
   - `v2/provenance.json`: sources and SHA-256.
 - **Exporter:** `python data/trajectory/sb_robot_trajs/tools/export_v2.py` (standard library; needs the git-ignored
   session).
-- **Status:** simulation only. Not yet run on the real robot.
+- **Revision 2026-11-10, 0010:** replaced by the session's `smooth_spin_j2` (bowl-arm J2 rule).
+  - The old file held the bowl with the arm in a "shoulder-up" pose (J1 +60°, J2 −136°). The new one uses the
+    usual pose (J1 −49 to −41°, J2 −58 to −55°).
+  - Bowl path: unchanged within 0.4 mm and 0.14°. Spoon arm: identical.
+  - Food simulation: executes; 11.9 mL kept, peak contact 1.4 N.
+  - The exporter only replaces a file that is byte-identical to the superseded source. `provenance.json` records
+    it under `replaces`, and `manifest.csv` has a `revision` column.
+  - Real-robot runs of 0010 in `real_runs/v2/` from before 2026-11-10 13:00 used the old file.
+- **Status:** 19 of 19 run on the real robot (2026-11-10), all scoop. Analysis:
+  `data/diagnostics/2026-11-10/real_runs_v2_analysis/` (git-ignored).

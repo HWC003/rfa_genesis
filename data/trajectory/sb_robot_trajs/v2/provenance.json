@@ -1,0 +1,168 @@
+{
+  "generator": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/tools/replan_bowl.py (variant smooth_spin)",
+  "session_readme": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/README.md",
+  "selection": "results/summary.csv sim_proposed_scoop_ok == True (food simulation executes: no jam/abort, food kept, spoon above the rim plane at the end)",
+  "selection_sources": {
+    "summary.csv": {
+      "path": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/results/summary.csv",
+      "sha256": "f7508e58aea1ab6bb58713161ed4f55fdf0b7f19823004ab61b8418ca594d9cf"
+    },
+    "metrics.csv": {
+      "path": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/results/metrics.csv",
+      "sha256": "f44cc913d4ca51c176e85a5057236ecbf983e01650912669e41b6908429a871a"
+    }
+  },
+  "excluded": [
+    "0003",
+    "0017"
+  ],
+  "revisions": {
+    "0010": {
+      "variant": "smooth_spin_j2",
+      "metrics": "metrics_0010_0001_j2.csv",
+      "date": "2026-11-10",
+      "reason": "bowl-arm J2 rule: J2 < -90 deg (shoulder-up branch) re-solved from the usual pose; same bowl path within 0.4 mm / 0.14 deg; food sim executes (11.9 mL, 1.4 N)"
+    }
+  },
+  "files": [
+    {
+      "recording": "0001",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0001.csv",
+      "source_sha256": "20d8698b7b7650a03cac2d662a562610a7a0170db0837389a0e8b9d24dc0c4c6",
+      "output": "v2/sb_traj_0001.csv",
+      "output_sha256": "20d8698b7b7650a03cac2d662a562610a7a0170db0837389a0e8b9d24dc0c4c6"
+    },
+    {
+      "recording": "0002",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0002.csv",
+      "source_sha256": "b074f11eb286eb2c4d7cb5e85712522e750c99a7ce641c43f8a2addc5353b460",
+      "output": "v2/sb_traj_0002.csv",
+      "output_sha256": "b074f11eb286eb2c4d7cb5e85712522e750c99a7ce641c43f8a2addc5353b460"
+    },
+    {
+      "recording": "0004",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0004.csv",
+      "source_sha256": "ddcaf38e4d9e2052a32e322be7a85bf66dd4543731effbee442701e8c0a1ac88",
+      "output": "v2/sb_traj_0004.csv",
+      "output_sha256": "ddcaf38e4d9e2052a32e322be7a85bf66dd4543731effbee442701e8c0a1ac88"
+    },
+    {
+      "recording": "0005",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0005.csv",
+      "source_sha256": "736d55151f2508b339cf42fc120004257742079077ff42b16cd21ebbf18e4ca0",
+      "output": "v2/sb_traj_0005.csv",
+      "output_sha256": "736d55151f2508b339cf42fc120004257742079077ff42b16cd21ebbf18e4ca0"
+    },
+    {
+      "recording": "0006",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0006.csv",
+      "source_sha256": "743790ae0a0981289fd68da1f397702ef7623793af4e6944a7924e858cfad5ae",
+      "output": "v2/sb_traj_0006.csv",
+      "output_sha256": "743790ae0a0981289fd68da1f397702ef7623793af4e6944a7924e858cfad5ae"
+    },
+    {
+      "recording": "0007",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0007.csv",
+      "source_sha256": "19ce444fe6c4e91861ff2ddbefbfaea413d9681690a2e5eb152947c0a20a423b",
+      "output": "v2/sb_traj_0007.csv",
+      "output_sha256": "19ce444fe6c4e91861ff2ddbefbfaea413d9681690a2e5eb152947c0a20a423b"
+    },
+    {
+      "recording": "0008",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0008.csv",
+      "source_sha256": "ee68df25da0a2a728709547a9cd517804bef74b9f4efebeb6c5fb7d03a91b281",
+      "output": "v2/sb_traj_0008.csv",
+      "output_sha256": "ee68df25da0a2a728709547a9cd517804bef74b9f4efebeb6c5fb7d03a91b281"
+    },
+    {
+      "recording": "0009",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0009.csv",
+      "source_sha256": "2b217fce66a5387ab41993ca54b193b10c31265deddf454921d5e4af8d01ffc0",
+      "output": "v2/sb_traj_0009.csv",
+      "output_sha256": "2b217fce66a5387ab41993ca54b193b10c31265deddf454921d5e4af8d01ffc0"
+    },
+    {
+      "recording": "0010",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin_j2/sb_traj_0010.csv",
+      "source_sha256": "817b2600c292b83290cf0f6f04cd09c068103efdf58b01bf8cc05042d4bf6b0f",
+      "output": "v2/sb_traj_0010.csv",
+      "output_sha256": "817b2600c292b83290cf0f6f04cd09c068103efdf58b01bf8cc05042d4bf6b0f",
+      "revision": "2026-11-10",
+      "reason": "bowl-arm J2 rule: J2 < -90 deg (shoulder-up branch) re-solved from the usual pose; same bowl path within 0.4 mm / 0.14 deg; food sim executes (11.9 mL, 1.4 N)",
+      "replaces": {
+        "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0010.csv",
+        "sha256": "b2ea8c4bae46a4498683b135feefc92fac9a2cdc022ee08b77ebe8d1e4c36227"
+      }
+    },
+    {
+      "recording": "0011",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0011.csv",
+      "source_sha256": "0e36aaa8286ddcb00080214daa18a1ef3ff1130fd8f96db6b673e5f742cf5f8f",
+      "output": "v2/sb_traj_0011.csv",
+      "output_sha256": "0e36aaa8286ddcb00080214daa18a1ef3ff1130fd8f96db6b673e5f742cf5f8f"
+    },
+    {
+      "recording": "0012",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0012.csv",
+      "source_sha256": "e7c80e18e5c7f3dc5cb36f17984493c0aee9bbcdd80eb35fa0be8623568a1135",
+      "output": "v2/sb_traj_0012.csv",
+      "output_sha256": "e7c80e18e5c7f3dc5cb36f17984493c0aee9bbcdd80eb35fa0be8623568a1135"
+    },
+    {
+      "recording": "0013",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0013.csv",
+      "source_sha256": "d898e9027b4415babf361fbd36434429638e7ecf54a52883259bbfcf0c7d1f72",
+      "output": "v2/sb_traj_0013.csv",
+      "output_sha256": "d898e9027b4415babf361fbd36434429638e7ecf54a52883259bbfcf0c7d1f72"
+    },
+    {
+      "recording": "0014",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0014.csv",
+      "source_sha256": "9961a0b9976ef7b97f4eb642a7a9c3b86b786efeac34d56ab34d37e98d337543",
+      "output": "v2/sb_traj_0014.csv",
+      "output_sha256": "9961a0b9976ef7b97f4eb642a7a9c3b86b786efeac34d56ab34d37e98d337543"
+    },
+    {
+      "recording": "0016",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0016.csv",
+      "source_sha256": "8d0709cbd3f7394dccd255c1a0be2f2445e17e6f898466f07af937573bc829cf",
+      "output": "v2/sb_traj_0016.csv",
+      "output_sha256": "8d0709cbd3f7394dccd255c1a0be2f2445e17e6f898466f07af937573bc829cf"
+    },
+    {
+      "recording": "0018",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0018.csv",
+      "source_sha256": "6713593439cbb4ef8b7e707c68f9e355c4aadbfb85a20b9613a0455cc397c5cc",
+      "output": "v2/sb_traj_0018.csv",
+      "output_sha256": "6713593439cbb4ef8b7e707c68f9e355c4aadbfb85a20b9613a0455cc397c5cc"
+    },
+    {
+      "recording": "0019",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0019.csv",
+      "source_sha256": "29f3e284f00c3436dcbb1a94e3ff6de176dfd67f148c976cca177f53ddf6a99c",
+      "output": "v2/sb_traj_0019.csv",
+      "output_sha256": "29f3e284f00c3436dcbb1a94e3ff6de176dfd67f148c976cca177f53ddf6a99c"
+    },
+    {
+      "recording": "0021",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0021.csv",
+      "source_sha256": "45c6791308d739aa63df25da1fb99fc98754228cc3b4892a7e92e45f176b4e8a",
+      "output": "v2/sb_traj_0021.csv",
+      "output_sha256": "45c6791308d739aa63df25da1fb99fc98754228cc3b4892a7e92e45f176b4e8a"
+    },
+    {
+      "recording": "0023",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0023.csv",
+      "source_sha256": "eb5074fa42be0191a7d0ca9f809af67f837729cfb2befc7e42ab967aab91a98c",
+      "output": "v2/sb_traj_0023.csv",
+      "output_sha256": "eb5074fa42be0191a7d0ca9f809af67f837729cfb2befc7e42ab967aab91a98c"
+    },
+    {
+      "recording": "0024",
+      "source": "data/diagnostics/2026-11-06/bowl_smoothing_and_spin/trajectories/smooth_spin/sb_traj_0024.csv",
+      "source_sha256": "e8fd63dd13b89299bec81e9dc53ba00d7baac867504ead916bcf6c141b578345",
+      "output": "v2/sb_traj_0024.csv",
+      "output_sha256": "e8fd63dd13b89299bec81e9dc53ba00d7baac867504ead916bcf6c141b578345"
+    }
+  ]
+}
