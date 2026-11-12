@@ -14,11 +14,15 @@ Trajectory sources:
   - joint plan (--joint-plan file.npz): replayed as planned, no IK, e.g. the stationary-bowl wall scoop
       --joint-plan data/trajectory/gen_trajs/gen_scoop_traj_34deg.npz --weld-bowl
     as validated in data/diagnostics/2026-10-02 and 2026-10-06 (there: SPH 3 mm, --particle-size 0.003).
+  - robot joint CSV (--joints file.csv, sb_robot_trajs format: time_from_start_s + 7 left + 7 right joints, rad):
+    replayed as is, no IK; the same file the real robot gets (oa_real_scooping_replay.py). --spoon is required
+    (sb_robot_trajs are v3). --blend-window 0.3 also applies the real robot's smooth start (trajectory_smoothing).
+      --joints data/trajectory/sb_robot_trajs/v2/sb_traj_0001.csv --spoon v3
 
 Spoon (--spoon): v1 is the original spoon in line with joint 7; v2 is the CAD attachment perpendicular to joint 7
 (spoon_mount_v2.usd). The v2 markers sit where v1's do relative to the dish, so any marker CSV runs unchanged with
---spoon v2 (IK puts the v2 dish where the v1 dish was). Joint plans are v1 joints: for v2, give the plan's marker
-CSV as --trajectory instead, e.g. --trajectory data/trajectory/gen_trajs/gen_scoop_traj_34deg.csv --weld-bowl.
+--spoon v2 (IK puts the v2 dish where the v1 dish was). Joint plans and joint CSVs are joints of the spoon they
+were planned for: a .npz with a 'spoon' entry must match --spoon; the gen_trajs .npz without one are v1 joints.
 
 Scene construction: scooping_scene.py. Food/scoop metrics and the success test: scooping_metrics.py
 (--evaluate, written to --diagnostics as metrics.csv, scoop_summary.json and particle snapshots).
@@ -48,6 +52,12 @@ parser.add_argument('--trajectory', type=Path, default=TRAJ_DIR / "real_trajs" /
 parser.add_argument('--joint-plan', type=Path,
                     help='Precomputed joint plan (.npz with times, q); replaces --trajectory and IK. A CSV with the '
                     'same name supplies the marker targets for recording')
+parser.add_argument('--joints', type=Path,
+                    help='Robot joint CSV (time_from_start_s + 7 left + 7 right joints, rad), replayed as is; no IK. '
+                    'Needs --spoon')
+parser.add_argument('--blend-window', type=float, default=0.0,
+                    help='--joints: retime the first seconds from rest as the real robot does (0.3 there; 0 = off)')
+parser.add_argument('--blend-duration', type=float, default=0.7, help='--joints: seconds the blend window is stretched to')
 parser.add_argument('--continuity-weight', type=float, default=0.012,
                     help='IK pull toward the previous joints (scooping_kinematics default 0.001; 0.012 validated 2026-09-28)')
 parser.add_argument('--joint-margin-deg', type=float, default=5.0,
@@ -55,8 +65,9 @@ parser.add_argument('--joint-margin-deg', type=float, default=5.0,
 parser.add_argument('--trim-after-exit', action='store_true',
                     help='End the replay once the spoon has lifted clear of the bowl (scooping_kinematics.task_frames); '
                     'needed for recordings that then carry the spoon out of reach')
-parser.add_argument('--spoon', choices=sorted(ss.SPOONS), default='v1',
-                    help='Spoon attachment: v1 original (in line with joint 7), v2 CAD attachment perpendicular to joint 7, '
+parser.add_argument('--spoon', choices=sorted(ss.SPOONS), default=None,
+                    help='Spoon attachment (default v1; required with --joints): v1 original (in line with joint 7), '
+                         'v2 CAD attachment perpendicular to joint 7, '
                          'v3 = v2 3.14 mm further from the joint-7 axis, v4 / v5 = v3 turned +90 / -90 deg about the '
                          'spoon axis (dish face inward / outward; 2026-10-30 spoon_mount_v4)')
 parser.add_argument('--weld-bowl', action='store_true',
@@ -97,9 +108,20 @@ if (args.evaluate or args.render_final) and not args.diagnostics:
     parser.error('--evaluate and --render-final need --diagnostics')
 if args.evaluate and args.no_liquid:
     parser.error('--evaluate needs liquid')
-if args.joint_plan and args.spoon != 'v1':
-    parser.error(f'--joint-plan files hold v1 joints; for --spoon {args.spoon} pass the plan\'s marker CSV as --trajectory '
-                 f'(e.g. {args.joint_plan.with_suffix(".csv")}) so IK plans the {args.spoon} spoon')
+if args.joint_plan and args.joints:
+    parser.error('--joint-plan and --joints are alternatives')
+if args.joints and args.spoon is None:
+    parser.error('--joints needs --spoon (the spoon the joints were planned for; sb_robot_trajs are v3)')
+if args.joint_plan:
+    with np.load(args.joint_plan) as _plan:
+        plan_spoon = str(_plan['spoon']) if 'spoon' in _plan.files else 'v1'     # gen_trajs plans: v1 joints
+    if args.spoon is None:
+        args.spoon = plan_spoon
+    if args.spoon != plan_spoon:
+        parser.error(f'{args.joint_plan.name} holds {plan_spoon} joints, --spoon is {args.spoon}; for another spoon '
+                     f'pass the plan\'s marker CSV as --trajectory so IK plans that spoon')
+args.spoon = args.spoon or 'v1'
+JOINT_INPUT = bool(args.joint_plan or args.joints)   # absolute joints, no IK
 phase_timings = []
 def report_phase(name, started):
     elapsed = time.perf_counter() - started
@@ -120,9 +142,20 @@ kins = (sk.ArmKinematics('left', margin=np.deg2rad(args.joint_margin_deg), conti
 
 # ------------------------------------------------------------------ trajectory --
 phase_start = time.perf_counter()
-if args.joint_plan:
-    TRAJ_SOURCE = args.joint_plan.resolve()
-    trajectory_times, q_plan, trajectory = sk.load_joint_plan(TRAJ_SOURCE)
+if args.joint_plan or args.joints:
+    if args.joint_plan:
+        TRAJ_SOURCE = args.joint_plan.resolve()
+        trajectory_times, q_plan, trajectory = sk.load_joint_plan(TRAJ_SOURCE)
+    else:
+        import scooping_io as sio
+        from trajectory_smoothing import smooth_start
+        TRAJ_SOURCE = args.joints.resolve()
+        trajectory_times, q_left, q_right, _ = sio.read_joint_csv(TRAJ_SOURCE)
+        trajectory_times, arms = smooth_start(trajectory_times, np.c_[q_left, q_right], args.blend_window,
+                                              args.blend_duration)
+        q_plan = np.tile(ss.SEED_Q, (len(trajectory_times), 1))       # fingers as in the 2026-11-06 sim plans
+        q_plan[:, left_arm], q_plan[:, right_arm] = arms[:, :7], arms[:, 7:]
+        trajectory = None
     task_end = len(trajectory_times) if args.max_frames is None else min(len(trajectory_times), args.max_frames)
     trajectory_times, q_plan = trajectory_times[:task_end], q_plan[:task_end]
     if trajectory is None:      # no marker CSV: record the plan's own forward kinematics
@@ -165,14 +198,14 @@ report_phase("trajectory_plan", phase_start)
 
 dense_times = trajectory_times[0] + DT * np.arange(1, round((trajectory_times[-1] - trajectory_times[0]) / DT) + 1)
 plan_times = np.r_[trajectory_times[0], dense_times]
-if args.joint_plan:
+if JOINT_INPUT:
     joint_plan = joint_spline(plan_times)
 else:
     joint_plan = np.tile(ss.SEED_Q, (len(plan_times), 1))
     joint_plan[:, left_arm] = plans[0]['spline'](plan_times)
     joint_plan[:, right_arm] = plans[1]['spline'](plan_times)
     joint_plan[:, left_finger] = ss.HELD_FINGER_POS
-joint_at = joint_spline if args.joint_plan else (lambda t: np.r_[plans[0]['spline'](t), [ss.HELD_FINGER_POS] * 2, plans[1]['spline'](t)])
+joint_at = joint_spline if JOINT_INPUT else (lambda t: np.r_[plans[0]['spline'](t), [ss.HELD_FINGER_POS] * 2, plans[1]['spline'](t)])
 planned_markers = np.array([np.r_[sk.marker_positions(kins[0], joint_at(t)[left_arm], bowl_locals),
                                   sk.marker_positions(kins[1], joint_at(t)[right_arm], spoon_locals)]
                             for t in trajectory_times])
@@ -273,12 +306,12 @@ def step():
 recorder = None
 if args.diagnostics:
     recorder = Recorder(args.diagnostics, {"bowl": templates['bowl_holder'], "spoon": spoon_locals},
-                        dict(trajectory=str(TRAJ_SOURCE), joint_plan=bool(args.joint_plan),
-                             scooping_point=None if args.joint_plan else SCOOPING_POINT.tolist(),
+                        dict(trajectory=str(TRAJ_SOURCE), joint_plan=JOINT_INPUT, blend_window_s=args.blend_window if args.joints else None,
+                             scooping_point=None if JOINT_INPUT else SCOOPING_POINT.tolist(),
                              task_end_s=float(trajectory_times[-1]), headless=args.headless, liquid=not args.no_liquid,
                              dt=scene.sim.dt, substeps=scene.sim.substeps, pos_tol_m=sk.POS_TOL,
                              plan=plan_metrics, playback="precomputed joint spline, one target per physics step",
-                             robot_usd=OPENARM_USD.name, spoon=args.spoon, joint_margin_deg=args.joint_margin_deg, continuity_weight=None if args.joint_plan else args.continuity_weight,
+                             robot_usd=OPENARM_USD.name, spoon=args.spoon, joint_margin_deg=args.joint_margin_deg, continuity_weight=None if JOINT_INPUT else args.continuity_weight,
                              trim_after_exit=args.trim_after_exit,
                              food=None if args.no_liquid else dict(particle_size=args.particle_size, sph_mu=args.sph_mu,
                                                                    sph_rho=args.sph_rho, sph_gamma=args.sph_gamma, size=list(food_box),
@@ -387,7 +420,7 @@ print(f"Peak spoon-bowl contact: {peak_contact[0]:.1f} N at replay t={peak_conta
 if evaluator:
     if aborted:
         print(f'ABORTED: {aborted}', flush=True)
-    summary = dict(trajectory=str(TRAJ_SOURCE), joint_plan=bool(args.joint_plan), spoon=args.spoon, weld_bowl=args.weld_bowl,
+    summary = dict(trajectory=str(TRAJ_SOURCE), joint_plan=JOINT_INPUT, spoon=args.spoon, weld_bowl=args.weld_bowl,
                    particle_size_m=args.particle_size, sph_mu=args.sph_mu, sph_rho=args.sph_rho, sph_gamma=args.sph_gamma,
                    food_size_m=args.food_size,
                    food_box_m=list(food_box), food_volume_mL=args.food_volume,

@@ -39,13 +39,15 @@ EXIT_DISTANCE = 0.15        # m, spoon-to-bowl distance that ends the scoop afte
 SMOOTH_HZ = 8.0             # zero-phase joint low-pass: strips marker jitter, keeps the scoop (<3 Hz)
 
 
-def load_trajectory():
-    """TRAJ_CSV as written: times (s) and (N, 9, 3) world markers (m), BOWL_NAMES + SPOON_NAMES order."""
-    rows = list(csv.DictReader(TRAJ_CSV.open()))
+def load_trajectory(path=None):
+    """Marker CSV (default TRAJ_CSV) as written: times (s) and (N, 9, 3) world markers (m), BOWL_NAMES + SPOON_NAMES
+    order."""
+    path = Path(path) if path is not None else TRAJ_CSV
+    rows = list(csv.DictReader(path.open()))
     times = np.array([float(r['Time']) for r in rows])
     markers = np.array([[[float(r[f'{n} {a}']) for a in 'XYZ'] for n in BOWL_NAMES + SPOON_NAMES] for r in rows])
     if len(times) < 2 or not np.isfinite(markers).all() or not np.all(np.diff(times) > 0):
-        raise ValueError(f'{TRAJ_CSV.name} needs >= 2 rows, finite positions and increasing times')
+        raise ValueError(f'{path.name} needs >= 2 rows, finite positions and increasing times')
     return times, markers
 
 
@@ -270,9 +272,40 @@ def smooth(times, q):
     return filtfilt(b, a, q, axis=0)
 
 
-def plan_arm(kin, times, pos, quat, seed):
-    """Full-rate continuous IK, then a smoothed spline for dense control."""
-    qs, errs = trace(kin, pos, quat, select_start(kin, pos, quat, seed))
+def settle_start(kin, pos0, quat0, q, iters=5):
+    """Frame 0 re-solved without the continuity term, from q.
+
+    The IK pulls each frame toward the previous joints (continuity) and toward mid-range (centring). From the
+    select_start pose the redundant DOF then drifts toward the centring optimum over the first frames: a self-motion
+    of up to 16 deg (L3) in ~20 ms at t = 0 with the bowl still. The fixed point of that drift is the
+    continuity-free solution (2026-11-06 bowl_smoothing_and_spin, replan_bowl.plan_arm_settled).
+    """
+    saved, kin.continuity = kin.continuity, 0.0
+    try:
+        for _ in range(iters):
+            q, _ = kin.solve(pos0, quat0, q)
+    finally:
+        kin.continuity = saved
+    return q
+
+
+def plan_arm(kin, times, pos, quat, seed, settle=False, j2_min_deg=None):
+    """Full-rate continuous IK, then a smoothed spline for dense control.
+
+    settle: solve frame 0 without continuity (settle_start), so the plan does not start with a self-motion.
+    j2_min_deg (with settle; pass it for the bowl arm): if the settled frame-0 J2 is below it (shoulder-up branch,
+    2026-11-10 v2 0010: -136 deg), frame 0 is re-solved from `seed` (the usual pose) instead.
+    The defaults reproduce the 2026-10-21 batch plans (sb_robot_trajs/v1).
+    """
+    q0 = select_start(kin, pos, quat, seed)
+    if settle:
+        q0 = settle_start(kin, pos[0], quat[0], q0)
+        if j2_min_deg is not None and np.degrees(q0[1]) < j2_min_deg:
+            q_usual = settle_start(kin, pos[0], quat[0], np.asarray(seed, float))
+            print(f'  frame 0: J2 {np.degrees(q0[1]):.0f} deg < {j2_min_deg:.0f} deg -> re-solved from the usual pose, '
+                  f'J2 {np.degrees(q_usual[1]):.0f} deg', flush=True)
+            q0 = q_usual
+    qs, errs = trace(kin, pos, quat, q0)
     spline = CubicSpline(times, np.clip(smooth(times, qs), kin.low, kin.high))
     q_s = spline(times)
     err_s = np.array([np.r_[p - T[:3, 3], (Rotation.from_quat(r[[1, 2, 3, 0]]) * Rotation.from_matrix(T[:3, :3]).inv()).as_rotvec()]
@@ -291,6 +324,18 @@ def arm_metrics(kin, times, plan):
                 min_limit_margin_deg=float(np.rad2deg(np.minimum(q - kin.low, kin.high - q).min())),
                 max_raw_step_deg=float(np.rad2deg(np.abs(np.diff(plan['raw'], axis=0)).max())),
                 max_vel_rad_s=float(np.abs(dq).max()), max_acc_rad_s2=float(np.abs(ddq).max()))
+
+
+def check_plan(kin, times, plan, min_margin_deg=5.0, j2_min_deg=None):
+    """Acceptance of one arm's plan: IK within tolerance on every frame, every joint >= min_margin_deg from its
+    limit, no IK branch jump (raw step <= MAX_STEP_DEG), and (j2_min_deg, bowl arm) J2 never below it.
+    Returns (ok, arm_metrics)."""
+    m = arm_metrics(kin, times, plan)
+    ok = (m['failing_frames'] == 0 and m['min_limit_margin_deg'] >= min_margin_deg - 0.05
+          and m['max_raw_step_deg'] <= MAX_STEP_DEG)
+    if j2_min_deg is not None:
+        ok = ok and np.degrees(plan['spline'](times)[:, 1]).min() >= j2_min_deg
+    return ok, m
 
 
 def plan_trajectory(times, targets, bowl_in_wrist, spoon_in_wrist, seed_q, kins=None):

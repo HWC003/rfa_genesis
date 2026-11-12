@@ -387,3 +387,131 @@ class ScoopEvaluator:
         s['failed_checks'] = [k for k, ok in checks.items() if not ok]
         s['success'] = not s['failed_checks']
         return s
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Demo geometry: spoon-vs-bowl depth on recorded (H, rel) poses, used by ingest and calibration.
+# Migrated unchanged from data/diagnostics/2026-10-13/greenbean_batch/tools/gb_common.py (InnerSurface,
+# spoon_verts_S, Geometry -> DemoGeometry, T_HB, TIP, RIM_Z, RIM_R) and
+# data/diagnostics/2026-10-19/soybean_calibration/tools/sb_common.py (subsample, deepest).
+# ---------------------------------------------------------------------------------------------------------------
+FLOOR_Y = -0.0209                                    # bowl floor (inner) height in the holder frame (m)
+TIP = np.array([0.205, 0.0, 0.0054])                 # dish front edge in {S} (m)
+# bowl frame B in the holder frame: origin = floor centre, Z_B = bowl axis (holder +y), X_B = -X_holder
+T_HB = np.eye(4); T_HB[:3, :3] = np.array([[-1, 0, 0], [0, 0, 1], [0, 1, 0.]]); T_HB[:3, 3] = (BOWL_AXIS_X, FLOOR_Y, 0)
+RIM_Z, RIM_R = 0.041, 0.0727                         # rim height above the floor along Z_B, rim radius (m)
+
+
+class InnerSurface:
+    """The bowl's inner (food-side) surface as its own mesh, from the height map grid (holder frame).
+
+    Depth below it, measured to the closest inner-surface point, is the true penetration into the bowl wall.
+    The nearest-surface signed distance of the closed bowl mesh is capped by the 3-4 mm wall thickness, and the
+    height-map (axial) gap is inflated on the steep wall; neither is used for penetration.
+    """
+
+    def __init__(self, cache=SURFACE_CACHE, r_max=0.0735):
+        a = np.load(cache); x, z, h = a['x'], a['z'], a['h']
+        X, Z = np.meshgrid(x, z, indexing='ij')
+        ok = (h > -0.1) & (np.hypot(X - BOWL_AXIS_X, Z) < r_max)
+        idx = -np.ones(h.shape, int); idx[ok] = np.arange(ok.sum())
+        V = np.c_[X[ok], h[ok], Z[ok]]
+        a0, a1, b0, b1 = idx[:-1, :-1], idx[1:, :-1], idx[:-1, 1:], idx[1:, 1:]
+        full = (a0 >= 0) & (a1 >= 0) & (b0 >= 0) & (b1 >= 0)
+        F = np.r_[np.c_[a0[full], a1[full], b1[full]], np.c_[a0[full], b1[full], b0[full]]]
+        self.mesh = trimesh.Trimesh(V, F, process=False)
+        self.pq = trimesh.proximity.ProximityQuery(self.mesh)
+        self.height = bowl_height_map(None, cache)
+        self.r_max = r_max
+
+    def depth(self, p):
+        """Per point (holder frame): + = below the inner surface (inside the wall), - = above; NaN outside the bowl."""
+        p = np.atleast_2d(p); hv = self.height(p[:, [0, 2]])
+        m = (hv > -0.1) & (np.hypot(p[:, 0] - BOWL_AXIS_X, p[:, 2]) < self.r_max)
+        out = np.full(len(p), np.nan)
+        if m.any():
+            _, dist, _ = self.pq.on_surface(p[m])
+            out[m] = np.where(p[m, 1] < hv[m], dist, -dist)
+        return out
+
+    def closest(self, p):
+        return self.pq.on_surface(np.atleast_2d(p))[0]
+
+
+def spoon_verts_S(spoon):
+    """Spoon collision-mesh points of a robot spoon version, in its spoon frame {S}."""
+    import scooping_scene as ss                      # lazy: scooping_scene imports this module
+    usd = ss.robot_usd(False, spoon); tool = ss.marker_templates(usd)['spoon_tool']
+    v = sample_vertices(load_meshes(usd)[0]['spoon'])
+    Ti = np.linalg.inv(tool)
+    return v @ Ti[:3, :3].T + Ti[:3, 3]
+
+
+class DemoGeometry:
+    """Bowl surfaces, spoon points and marker templates for measuring recorded demos.
+
+    spoon: whose collision mesh measures the spoon ('v1' = the ScoopGeometry spoon). The marker templates are the
+    USD ones of the v1 robot: bowl markers in the holder frame, spoon markers in {S} (the same on every spoon version).
+    """
+
+    def __init__(self, spoon='v3'):
+        import scooping_scene as ss
+        self.spoon = spoon
+        self.g = ScoopGeometry()
+        self.bowl_q = trimesh.proximity.ProximityQuery(self.g.meshes['bowl'])
+        self.inner = InnerSurface()
+        self.spoon_V = spoon_verts_S(spoon) if spoon != 'v1' else self.g.verts
+        t = ss.marker_templates(ss.robot_usd())
+        self.bowl_h = np.array(t['bowl_holder'])
+        self.spoon_s = np.array(t['spoon'])
+
+
+def subsample(V, cell=0.0015):
+    """One point per `cell` voxel."""
+    return V[np.unique(np.round(V / cell).astype(int), axis=0, return_index=True)[1]]
+
+
+def deepest(geo, rel, pts, band=0.015):
+    """Per frame: the spoon point with the largest inner-surface depth (+ = inside the wall).
+
+    rel: (N, 4, 4) spoon {S} in the holder frame; pts: spoon points in {S}. Returns depth (m), the point in the holder
+    frame, its closest inner-surface point, the unit normal pointing from the surface into the food space, and the
+    point's index in pts. NaN where no point is near the bowl.
+    """
+    g = geo.g; n = len(rel)
+    d = np.full(n, np.nan); p = np.full((n, 3), np.nan); c = np.full((n, 3), np.nan)
+    nrm = np.full((n, 3), np.nan); j_s = np.full(n, -1)
+    for k, T in enumerate(rel):
+        v = pts @ T[:3, :3].T + T[:3, 3]
+        near = np.nonzero(v[:, 1] - g.height(v[:, [0, 2]]) < band)[0]
+        if not len(near):
+            continue
+        dd = geo.inner.depth(v[near])
+        if not np.isfinite(dd).any():
+            continue
+        j = int(np.nanargmax(dd)); q = v[near[j]]; cq = geo.inner.closest(q[None])[0]
+        u = q - cq; nu = np.linalg.norm(u)
+        if nu < 1e-7:                                  # on the surface: use the mesh face normal
+            _, _, tri = geo.inner.pq.on_surface(q[None]); u = geo.inner.mesh.face_normals[tri[0]]
+            u = u if u[1] > 0 else -u
+        else:
+            u = u / nu * (1 if dd[j] < 0 else -1)      # surface -> food space
+        d[k], p[k], c[k], nrm[k], j_s[k] = dd[j], q, cq, u, near[j]
+    return d, p, c, nrm, j_s
+
+
+_DEEPEST = {}
+
+
+def _deepest_chunk(rel):
+    return deepest(_DEEPEST['geo'], rel, _DEEPEST['pts'])
+
+
+def deepest_par(geo, rel, pts, n=16):
+    """deepest() over many frames, split over n processes (fork). Same outputs as deepest()."""
+    from multiprocessing import Pool
+    _DEEPEST.update(geo=geo, pts=pts)
+    chunks = np.array_split(np.arange(len(rel)), n)
+    with Pool(n) as pool:
+        results = pool.map(_deepest_chunk, [rel[c] for c in chunks])
+    return [np.concatenate([res[i] for res in results]) for i in range(5)]

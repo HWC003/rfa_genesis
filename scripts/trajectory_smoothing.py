@@ -11,7 +11,7 @@ Every joint passes through exactly the same joint-space path as the CSV (same sp
 only slower at the start. The rest of the CSV follows unchanged, shifted by duration - window seconds.
 s stays monotonic for window < duration <= 2.5 * window.
 
-Pure numpy: used by oa_real_scooping_replay.py (ROS) and oa_joint_replay.py (Genesis).
+Pure numpy: used by oa_real_scooping_replay.py (ROS) and oa_pure_scooping.py --joints --blend-window (Genesis).
 """
 import numpy as np
 
