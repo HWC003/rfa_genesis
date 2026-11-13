@@ -4,15 +4,30 @@ Per take, in order:
   1. scooping_io.load_take          lab mm -> world m (NAMES order), gap-filled flags
   2. robust_poses                    bowl holder H(t) and spoon {S} S(t) by robust Kabsch (measured bowl layout from
                                      the session calibration; a mislabelled bowl marker dropped; bad frames Slerped)
-  3. analyse                         phases (entry, low0, deep, c0, c1, low1, lift) from the dish tip vs the bowl
-  4. crop                            [entry - 0.5 s, lift + 0.5 s]
-  5. apply                           calibration (bowl shift t, spoon shift s): rel_cal = C @ inv(H) @ S @ Ts
+  3. apply                           calibration (bowl shift t, spoon shift s): rel_cal = C @ inv(H) @ S @ Ts
+  4. analyse + check_phases          phases from the calibrated dish tip vs the bowl (standard below)
+  5. crop                            [entry - 0.5 s, lift + 0.5 s]
   6. depth (scooping_metrics.deepest) before / after calibration
 Episode arrays (scooping_io.save_episode): t, H, raw, cal, depth_raw, depth_cal, phase, idx (as prep_XXXX.npz of
 2026-10-21/soybean_batch) plus t_qtm0 (QTM time of the first kept frame), crop, bowl_fit_res, spoon_fit_res,
 not_gap_filled. The .json summary holds the prepare.json fields and provenance.
 
-Migrated from the diagnostics, behaviour unchanged:
+Phase standard (holder frame H, bowl frame B = H @ T_HB, dish tip = scooping_metrics.TIP in {S}; all on the
+calibrated spoon pose rel_cal, i.e. the pose the robot is planned from):
+  entry      first frame with the tip inside the rim cylinder (below the rim plane in B, radius < RIM_R)
+  low0/low1  first / last frame of the longest stretch after entry with the tip within LOW (10 mm) of the inner
+             bowl surface; stretches separated by <= LOW_GAP_S (0.2 s) are merged
+  deep       lowest tip (relative to the surface) between low0 and low1
+  c0/c1      curl: the spoon's face-up angle (world vertical vs {S} +z) has dropped by 10 % / 90 % of its total drop
+             after its peak (peak searched between entry and lift)
+  lift       first frame after low1 with the tip above the rim plane
+  Required order (check_phases): entry <= low0 <= deep <= low1 < lift and entry <= c0 <= c1 <= lift. The curl may
+  start before low0 (0010). Labels per frame: approach < entry <= descent < low0 <= sweep < c0 <= curl <= c1 < slide
+  <= low1 < lift-label <= lift < out; when c0 < low0 the curl label wins.
+Changed 2026-11-13 (user decision): phases used to run on poses rebuilt as markers and refitted with the USD bowl
+template, on the uncalibrated spoon (2026-10-21 prepare.py). See data/diagnostics/2026-11-13/migration_steps_4_5.
+
+Migrated from the diagnostics:
   pose, analyse, crop      2026-10-13/greenbean_batch/tools/gb_common.py
   robust_poses              2026-10-19/soybean_calibration/tools/sb_common.py::poses
   correction, apply         2026-10-19/soybean_calibration/tools/calibrate.py
@@ -31,6 +46,7 @@ from trajectory_diagnostics import fit_pose
 
 BAD_FIT = 0.004            # bowl fit residual (m) above which a marker is suspect
 LOW = 0.010                # dish tip within this of the surface = low (scooping) frames
+LOW_GAP_S = 0.2            # low stretches closer than this are one stretch
 CROP_BEFORE, CROP_AFTER = 0.5, 0.5
 
 
@@ -98,12 +114,8 @@ def apply(rel, x, parts):
 
 
 def analyse(geo, times, H, S):
-    """Phase indices, per-frame signals and a summary dict from the bowl holder and spoon poses.
-
-    Phases (dish tip TIP vs the bowl): entry = first frame inside the rim cylinder; low0/low1 = longest run of the tip
-    within LOW of the inner surface; deep = lowest tip; lift = first frame after low1 above the rim; c0/c1 = the
-    spoon face-up angle has dropped by 10 % / 90 % (curl).
-    """
+    """Phase indices, per-frame signals and a summary dict from the bowl holder and spoon poses (module docstring:
+    phase standard). Raises ValueError when a phase cannot be found or the order is violated."""
     g = geo.g
     B = H @ sm.T_HB
     rel = np.linalg.inv(H) @ S
@@ -120,16 +132,20 @@ def analyse(geo, times, H, S):
             if np.isfinite(d).any():
                 j = int(np.nanargmax(d))
                 pen[k] = d[j]; pen_part[k] = geo.spoon_V[near[j], 0]
-            pen_rad[k] = np.hypot(v[near[j], 0] - sm.BOWL_AXIS_X, v[near[j], 2])
+                pen_rad[k] = np.hypot(v[near[j], 0] - sm.BOWL_AXIS_X, v[near[j], 2])
     face_up = np.degrees(np.arccos(np.clip(S[:, 2, 2], -1, 1)))
     tilt = np.degrees(np.arccos(np.clip(B[:, 2, 2], -1, 1)))
     a = np.arctan2(-B[:, 2, 1], -B[:, 2, 0])                 # low-rim direction in B
     low_w = np.einsum('nij,nj->ni', B[:, :3, :3], np.c_[np.cos(a), np.sin(a), np.zeros_like(a)])
     rad = np.hypot(tipB[:, 0], tipB[:, 1])
     inside = (tipB[:, 2] < sm.RIM_Z) & (rad < sm.RIM_R)
+    if not inside.any():
+        raise ValueError('the dish tip never enters the rim cylinder')
     i_entry = int(np.argmax(inside))
     low = np.nonzero((h_tip < LOW) & (np.arange(n) >= i_entry))[0]
-    runs = np.split(low, np.nonzero(np.diff(low) > 20)[0] + 1)
+    if not len(low):
+        raise ValueError(f'the dish tip never comes within {LOW * 1e3:.0f} mm of the bowl surface')
+    runs = np.split(low, np.nonzero(np.diff(times[low]) > LOW_GAP_S + 1e-9)[0] + 1)
     main = max(runs, key=len); i_low0, i_low1 = int(main[0]), int(main[-1])
     above = np.nonzero((tipB[:, 2] > sm.RIM_Z) & (np.arange(n) > i_low1))[0]
     i_lift = int(above[0]) if len(above) else n - 1
@@ -166,7 +182,21 @@ def analyse(geo, times, H, S):
     )
     sig = dict(tipB=tipB, h_tip=h_tip, pen=pen, face_up=face_up, tilt=tilt, phase=phase)
     idx = dict(entry=i_entry, low0=i_low0, low1=i_low1, c0=i_c0, c1=i_c1, lift=i_lift, deep=i_deep)
+    check_phases(idx, n)
     return summ, sig, idx
+
+
+def check_phases(idx, n):
+    """Raise ValueError unless entry <= low0 <= deep <= low1 < lift and entry <= c0 <= c1 <= lift < n."""
+    i = idx
+    chains = [('entry', 'low0', 'deep', 'low1'), ('entry', 'c0', 'c1', 'lift')]
+    bad = [f'{a} {i[a]} > {b} {i[b]}' for ch in chains for a, b in zip(ch, ch[1:]) if i[a] > i[b]]
+    if i['low1'] >= i['lift']:
+        bad.append(f"low1 {i['low1']} >= lift {i['lift']}")
+    if not (0 <= i['entry'] and i['lift'] < n):
+        bad.append('index outside the take')
+    if bad:
+        raise ValueError('phase order violated: ' + '; '.join(bad))
 
 
 def crop(idx, times, before=CROP_BEFORE, after=CROP_AFTER):
@@ -174,17 +204,6 @@ def crop(idx, times, before=CROP_BEFORE, after=CROP_AFTER):
     i0 = max(0, int(np.searchsorted(times, times[idx['entry']] - before)))
     i1 = min(len(times) - 1, int(np.searchsorted(times, times[idx['lift']] + after)))
     return i0, i1
-
-
-def phase_poses(H, S, layout_H, bowl_usd, spoon_tpl):
-    """Poses the phase detection runs on: markers rebuilt from the robust poses with the measured layout, refitted
-    with the USD bowl template (2026-10-21 prepare.py did this; it removes marker glitches from the phase signals).
-    The refit moves H by the layout-vs-USD template difference (<= 2.4 mm per marker)."""
-    Hp, Sp = [], []
-    for h, s in zip(H, S):
-        P = np.r_[layout_H @ h[:3, :3].T + h[:3, 3], spoon_tpl @ s[:3, :3].T + s[:3, 3]]
-        Hp.append(pose(bowl_usd, P[:5])[0]); Sp.append(pose(spoon_tpl, P[5:])[0])
-    return np.array(Hp), np.array(Sp)
 
 
 def ingest_take(geo, tsv, calibration, pts=None):
@@ -197,15 +216,15 @@ def ingest_take(geo, tsv, calibration, pts=None):
     pts = sm.subsample(geo.spoon_V) if pts is None else pts
     t, M, ok = sio.load_take(tsv)
     H, S, rb, rs = robust_poses(M, layout, geo.spoon_s, ok)
-    Hp, Sp = phase_poses(H, S, layout, geo.bowl_h, geo.spoon_s)
+    rel_all = np.linalg.inv(H) @ S
+    rel_cal_all = apply(rel_all, x, parts)
     try:
-        summ, sig, idx = analyse(geo, t, Hp, Sp)
+        summ, sig, idx = analyse(geo, t, H, H @ rel_cal_all)
     except Exception as e:  # noqa: BLE001
         raise ValueError(f'phase detection failed: {type(e).__name__}: {e}') from e
     i0, i1 = crop(idx, t)
     k = slice(i0, i1 + 1)
-    rel = np.linalg.inv(H[k]) @ S[k]
-    rel_cal = apply(rel, x, parts)
+    rel, rel_cal = rel_all[k], rel_cal_all[k]
     d_raw = sm.deepest_par(geo, rel, pts)[0]
     d_cal = sm.deepest_par(geo, rel_cal, pts)[0]
     tt = t[k] - t[i0]

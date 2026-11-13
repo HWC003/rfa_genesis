@@ -7,11 +7,15 @@
     plan                   bowl = 'demo' | 'hold' (scooping_motion.smooth_bowl, spoon kept in the bowl frame and
                            low-passed); spin = True: bowl turned about its axis to SPIN_TARGET + delta, first delta
                            in SPIN_DELTAS that passes check_plan; IK with a settled frame 0 and the bowl-arm J2 rule
+    floor_lift_mm > 0      after the spin choice the spoon target is raised along the bowl normal where its clearance
+                           is below floor_lift_mm (scooping_motion.floor_lift) and the spoon arm re-planned
     sample                 joint splines at DT -> rows for the joint CSV (scooping_io.write_joint_csv)
+    metrics                plan metrics, incl. entry_min_clearance_mm (rim clearance while the dish enters the bowl)
+                           and end_spoon_above_rim_mm (both used by scooping_gate)
 
 bowl='hold', spin=True is the 2026-11-06 'smooth_spin' re-plan (sb_robot_trajs/v2).
 Migrated from data/diagnostics/2026-11-06/bowl_smoothing_and_spin/tools/replan_bowl.py (main, choose_spin, plan_one,
-evaluate) and bowl_common.py (kins, wrist targets, bowl measures); behaviour unchanged.
+evaluate), floor_lift.py and bowl_common.py (kins, wrist targets, bowl measures); behaviour unchanged.
 """
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -27,6 +31,7 @@ MIN_MARGIN_DEG = 5.0
 BOWL_J2_MIN_DEG = -90.0                                    # bowl arm J2 below this = shoulder-up branch (2026-11-10)
 CONTINUITY = 0.012
 DT_OUT = ss.DT
+ENTRY_E_MM = 40.0                                          # entry window starts with the dish this far above rim height
 
 
 class Planner:
@@ -79,9 +84,10 @@ class Planner:
         d, ok, m, Tn, p = max(tried, key=lambda x: x[2]['min_limit_margin_deg'])
         return d, False, Tn, p, tried
 
-    def plan(self, t, T, WR, flat=None, bowl='hold', spin=True):
+    def plan(self, t, T, WR, flat=None, bowl='hold', spin=True, floor_lift_mm=0.0):
         """Both arms' plans for holder poses T and right-wrist poses WR. Returns (plans, bowl poses, info).
-        flat: None = computed from the own tilt (scooping_motion.FLAT_TILT_DEG)."""
+        flat: None = computed from the own tilt (scooping_motion.FLAT_TILT_DEG). floor_lift_mm > 0: spoon raised
+        along the bowl normal where its planned clearance is below this (scooping_motion.floor_lift)."""
         X = np.linalg.inv(T) @ WR                              # right wrist in the holder frame
         inside = mo.dish_height_mm(T, WR @ self.spoon_tool) < 0
         own_tilt = mo.own_tilt_deg(T, inside)
@@ -96,10 +102,12 @@ class Planner:
                 info['tipback'] = True
                 Tb, info['t_tilt_s'] = mo.smooth_bowl(t, T, inside, False, tipback=True)
                 rplan = self._plan(self.kr, t, Tb @ Xs, seed_r)
+            WRp = Tb @ Xs
             dX = np.linalg.inv(X) @ Xs
             info['spoon_in_bowl_change_max_mm'] = float(1000 * np.linalg.norm(dX[:, :3, 3], axis=1).max())
         elif bowl == 'demo':
             Tb = T
+            WRp = WR
             rplan = self._plan(self.kr, t, WR, seed_r)
         else:
             raise ValueError(f'bowl must be demo or hold, not {bowl}')
@@ -109,6 +117,14 @@ class Planner:
                 f"{x[0]:+d}:{'ok' if x[1] else 'x'}({x[2]['min_limit_margin_deg']:.1f})" for x in tried))
         else:
             lplan = self.plan_bowl(t, Tb)
+        if floor_lift_mm and floor_lift_mm > 0:
+            c0 = mo.clearance_mm(self.geom, Tb, WRp, self.spoon_tool)
+            L, WRl, c1 = mo.floor_lift(self.geom, t, Tb, WRp, self.spoon_tool, floor_lift_mm)
+            rplan = self._plan(self.kr, t, WRl, seed_r)
+            on = L > .05
+            info['floor_lift'] = dict(threshold_mm=float(floor_lift_mm), max_lift_mm=round(float(L.max()), 2),
+                                      lifted_s=[round(float(t[on][0]), 2), round(float(t[on][-1]), 2)] if on.any() else None,
+                                      target_min_clearance_mm=[round(float(c0.min()), 2), round(float(c1.min()), 2)])
         okl, ml = self._check(self.kl, t, lplan, j2=True)
         okr, mr = self._check(self.kr, t, rplan)
         info.update(plan_ok=bool(okl and okr), left=ml, right=mr, inside=inside)    # inside: array, not for JSON
@@ -120,6 +136,26 @@ class Planner:
         """Rows at DT_OUT from 0 to the end: (tt, left q (n, 7), right q (n, 7))."""
         tt = np.arange(0, t[-1] + 1e-9, DT_OUT)
         return tt, plans[0]['spline'](tt), plans[1]['spline'](tt)
+
+    def entry_clearance_mm(self, Tb, qr):
+        """Min spoon-bowl clearance (mm) while the dish centre enters: from ENTRY_E_MM above rim height (e, holder +y)
+        until it first goes below rim height. 2026-11-13 rim_entry_check: lowest for 0023 / 0024 (2.6 / 3.1 mm,
+        rim contact measured on the robot in v1 and v2), 5-23 mm for the others."""
+        S = np.array([self.kr.fk(q)[0] @ self.spoon_tool for q in qr])
+        d = np.einsum('nij,nj->ni', S[:, :3, :3], np.broadcast_to(sm.DISH_CENTRE, (len(S), 3))) + S[:, :3, 3]
+        e = np.einsum('nji,nj->ni', Tb[:, :3, :3], d - Tb[:, :3, 3])[:, 1] - sm.RIM_CENTRE[1]
+        below = np.nonzero(e < 0)[0]
+        k1 = below[0] if len(below) else len(e)
+        k0 = np.nonzero(e[:k1] <= ENTRY_E_MM / 1000)[0]
+        if not len(k0):
+            return float('nan')
+        return float(min(self.geom.gap(B, s) for B, s in zip(Tb[k0[0]:k1], S[k0[0]:k1])) * 1000)
+
+    def end_above_rim_mm(self, B, S):
+        """End of the plan: lowest spoon point above the rim plane along the bowl axis (bowl frame; > 0 = clear).
+        As 2026-11-06 plot_results.spoon_above_rim_plane_mm."""
+        v = self.geom.verts @ S[:3, :3].T + S[:3, 3]
+        return float(1000 * (((v - B[:3, 3]) @ B[:3, :3])[:, 1].min() - sm.RIM_CENTRE[1]))
 
     def metrics(self, t, plans, inside=None):
         """Plan metrics (as 2026-11-06 replan_bowl.evaluate): IK, margins, speeds, bowl tilt / spin, clearance.
@@ -143,7 +179,9 @@ class Planner:
             tilt_start_end_deg=f'{tl[0]:.1f}/{tl[-1]:.1f}',
             spin_mean_range_deg=f'{mo.wrap(sp.mean()):.1f}/{np.ptp(sp):.1f}',
             xb_from_world_y_deg=round(float(np.abs(mo.wrap(sp - SPIN_TARGET)).max()), 1),
-            min_clearance_mm=round(float(gap.min()), 1), duration_s=round(float(tt[-1]), 3), samples=int(len(tt)))
+            min_clearance_mm=round(float(gap.min()), 1), duration_s=round(float(tt[-1]), 3), samples=int(len(tt)),
+            entry_min_clearance_mm=round(self.entry_clearance_mm(Tb, qr), 1),
+            end_spoon_above_rim_mm=round(self.end_above_rim_mm(Tb[-1], self.kr.fk(qr[-1])[0] @ self.spoon_tool), 1))
         if inside is not None:
             ins = np.interp(tt, t, inside.astype(float)) > .5
             out['tilt_start_hold_end_deg'] = f'{tl[0]:.1f}/{tl[ins].mean():.1f}/{tl[-1]:.1f}'

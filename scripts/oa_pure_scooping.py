@@ -5,19 +5,24 @@ link (openarm_spoon_bowl*.usd), in the pose oa_full_sim.py grasps it, so its mar
 points read from USD. The whole joint trajectory is known before the scene is built; the robot starts at the
 replay's first pose, the liquid settles in the bowl, then the trajectory streams (one target per physics step).
 
+Defaults (since 2026-11-13) are the validated soybean-pudding setup: spoon v3, the soybean 0017 marker CSV
+(sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv) at its screened placement (0.22, -0.04, 0.44), food 56.51 (= 41.7 mL
+real, see README), rho 960 / mu 0.01 / gamma 0.01, 6 mm particles, hold 2 s, clearance abort -30 mm. The former
+green-bean defaults (v1 spoon, rho 1000, hold 0, -2 mm, 60 mm food cube) are
+  --spoon v1 --trajectory data/trajectory/real_trajs/gb_0017_gen_frame_cropped_corrected.csv
+  --scooping-point 0.34 -0.13 0.43 --sph-rho 1000 --hold 0 --gate-clearance-mm -2 --food-volume 0
+
 Trajectory sources:
-  - marker CSV (--trajectory, default): planned with scooping_kinematics IK. Defaults are the validated
-    "corrected CSV + continuity solver" setup of data/diagnostics/2026-09-28/cropped_contact_correction:
-    real_trajs/gb_0017_gen_frame_cropped_corrected.csv (x1.6 time, 9.584 s), in full, IK continuity weight
-    0.012. The former oa_pure_scooping.py behaviour is
-      --trajectory data/trajectory/real_trajs/gb_0017_gen_frame_cropped.csv --continuity-weight 0.001 --trim-after-exit
+  - marker CSV (--trajectory, default): planned with scooping_kinematics IK (continuity weight 0.012, validated
+    in data/diagnostics/2026-09-28/cropped_contact_correction).
   - joint plan (--joint-plan file.npz): replayed as planned, no IK, e.g. the stationary-bowl wall scoop
       --joint-plan data/trajectory/gen_trajs/gen_scoop_traj_34deg.npz --weld-bowl
     as validated in data/diagnostics/2026-10-02 and 2026-10-06 (there: SPH 3 mm, --particle-size 0.003).
   - robot joint CSV (--joints file.csv, sb_robot_trajs format: time_from_start_s + 7 left + 7 right joints, rad):
-    replayed as is, no IK; the same file the real robot gets (oa_real_scooping_replay.py). --spoon is required
-    (sb_robot_trajs are v3). --blend-window 0.3 also applies the real robot's smooth start (trajectory_smoothing).
-      --joints data/trajectory/sb_robot_trajs/v2/sb_traj_0001.csv --spoon v3
+    replayed as is, no IK; the same file the real robot gets (oa_real_scooping_replay.py). The joints must be for
+    --spoon (sb_robot_trajs are v3). Pipeline plans (scooping_pipeline.py) already start at rest; the older v1 / v2
+    CSVs start mid-motion and get the robot's smooth start only with --blend-window 0.3 (trajectory_smoothing).
+      --joints data/trajectory/sb_robot_trajs/v2/sb_traj_0001.csv
 
 Spoon (--spoon): v1 is the original spoon in line with joint 7; v2 is the CAD attachment perpendicular to joint 7
 (spoon_mount_v2.usd). The v2 markers sit where v1's do relative to the dish, so any marker CSV runs unchanged with
@@ -47,14 +52,14 @@ from trajectory_diagnostics import Recorder
 TRAJ_DIR = Path(__file__).resolve().parent.parent / "data" / "trajectory"
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument('--trajectory', type=Path, default=TRAJ_DIR / "real_trajs" / "gb_0017_gen_frame_cropped_corrected.csv",
-                    help='Marker trajectory CSV, planned with IK (default: the corrected cropped scoop)')
+parser.add_argument('--trajectory', type=Path, default=TRAJ_DIR / "sim_ready_trajs" / "sb_0017_cal_x1.6_yaw180.csv",
+                    help='Marker trajectory CSV, planned with IK (default: soybean 0017, cal)')
 parser.add_argument('--joint-plan', type=Path,
                     help='Precomputed joint plan (.npz with times, q); replaces --trajectory and IK. A CSV with the '
                     'same name supplies the marker targets for recording')
 parser.add_argument('--joints', type=Path,
                     help='Robot joint CSV (time_from_start_s + 7 left + 7 right joints, rad), replayed as is; no IK. '
-                    'Needs --spoon')
+                    'Joints of --spoon')
 parser.add_argument('--blend-window', type=float, default=0.0,
                     help='--joints: retime the first seconds from rest as the real robot does (0.3 there; 0 = off)')
 parser.add_argument('--blend-duration', type=float, default=0.7, help='--joints: seconds the blend window is stretched to')
@@ -66,28 +71,29 @@ parser.add_argument('--trim-after-exit', action='store_true',
                     help='End the replay once the spoon has lifted clear of the bowl (scooping_kinematics.task_frames); '
                     'needed for recordings that then carry the spoon out of reach')
 parser.add_argument('--spoon', choices=sorted(ss.SPOONS), default=None,
-                    help='Spoon attachment (default v1; required with --joints): v1 original (in line with joint 7), '
+                    help='Spoon attachment (default v3, or the spoon stored in a --joint-plan): v1 original (in line with joint 7), '
                          'v2 CAD attachment perpendicular to joint 7, '
                          'v3 = v2 3.14 mm further from the joint-7 axis, v4 / v5 = v3 turned +90 / -90 deg about the '
                          'spoon axis (dish face inward / outward; 2026-10-30 spoon_mount_v4)')
 parser.add_argument('--weld-bowl', action='store_true',
                     help='Weld the left wrist (bowl) to the world at the first pose: a stationary bowl')
 parser.add_argument('--sph-mu', type=float, default=0.01, help='SPH liquid viscosity mu (Genesis default 0.005; 0.01 matches the soybean pudding scoops, 2026-10-26 sph_param_validation)')
-parser.add_argument('--sph-rho', type=float, default=1000.0, help='SPH liquid rest density (kg/m^3, Genesis default 1000)')
+parser.add_argument('--sph-rho', type=float, default=960.0, help='SPH liquid rest density (kg/m^3; 960 = soybean pudding, Genesis default 1000)')
 parser.add_argument('--sph-gamma', type=float, default=0.01, help='SPH liquid surface tension / cohesion (Genesis default 0.01)')
 parser.add_argument('--particle-size', type=float, default=0.006, help='SPH particle size (m)')
 parser.add_argument('--food-size', type=float, default=0.06, help='Edge of the food cube (m)')
-parser.add_argument('--food-volume', type=float,
-                    help='Food volume (mL), overrides --food-size: particles = volume / (0.8 particle_size^3) (Genesis particle '
-                         'volume, so the food mass is density x volume), in a near-cubic box of whole particles')
+parser.add_argument('--food-volume', type=float, default=56.51,
+                    help='Food volume (mL; default 56.51 = soybean 0017, 41.7 mL real), overrides --food-size: particles = '
+                         'volume / (0.8 particle_size^3) (Genesis particle volume, so the food mass is density x volume), in a '
+                         'near-cubic box of whole particles. 0 = use --food-size')
 parser.add_argument('--food-gap', type=float, default=0.03, help='Height of the food cube bottom above the rim centre (m)')
 parser.add_argument('--food-vis', choices=['recon', 'particle'], default='recon', help='Food rendering')
 parser.add_argument('--settle-time', type=float, default=2.0,
                     help='Seconds held at the first replay pose while the liquid settles (s)')
-parser.add_argument('--hold', type=float, default=0.0, help='Seconds the final pose is held after the replay (s)')
+parser.add_argument('--hold', type=float, default=2.0, help='Seconds the final pose is held after the replay (s)')
 parser.add_argument('--evaluate', action='store_true',
                     help='Food/scoop metrics every 20 ms and the success test (needs --diagnostics and liquid)')
-parser.add_argument('--gate-clearance-mm', type=float, default=-2.0,
+parser.add_argument('--gate-clearance-mm', type=float, default=-30.0,
                     help='With --evaluate, abort when the spoon-bowl clearance (axial, inflated on the steep wall) drops '
                          'below this (mm); e.g. -30 for 0 mm clearance trajectories. The 30 N contact gate always applies')
 parser.add_argument('--submerged-window', type=float, nargs=2, metavar=('T0', 'T1'),
@@ -99,9 +105,9 @@ parser.add_argument('--diagnostics', type=Path, help='Directory for CSVs, plots 
 parser.add_argument('--max-frames', type=int, help='Limit recorded frames for a short smoke test')
 parser.add_argument('--no-liquid', action='store_true', help='Rigid-only comparison; changes physics')
 parser.add_argument('--backend', choices=['gpu', 'cpu'], default='gpu')
-parser.add_argument('--scooping-point', type=float, nargs=3, default=sk.SELECTED_POINT.tolist(),
+parser.add_argument('--scooping-point', type=float, nargs=3, default=[0.22, -0.04, 0.44],
                     metavar=('X', 'Y', 'Z'), help='Where the first Bowl_center sample of the trajectory CSV is moved to (pure translation); '
-                    'default is the screened placement. Not used with --joint-plan (absolute joints)')
+                    'default is the soybean placement (sim_ready_trajs/manifest.csv). Not used with --joint-plan / --joints')
 parser.add_argument('--show-markers', action='store_true', help='Render the bowl and spoon marker spheres')
 args = parser.parse_args()
 if (args.evaluate or args.render_final) and not args.diagnostics:
@@ -110,8 +116,6 @@ if args.evaluate and args.no_liquid:
     parser.error('--evaluate needs liquid')
 if args.joint_plan and args.joints:
     parser.error('--joint-plan and --joints are alternatives')
-if args.joints and args.spoon is None:
-    parser.error('--joints needs --spoon (the spoon the joints were planned for; sb_robot_trajs are v3)')
 if args.joint_plan:
     with np.load(args.joint_plan) as _plan:
         plan_spoon = str(_plan['spoon']) if 'spoon' in _plan.files else 'v1'     # gen_trajs plans: v1 joints
@@ -120,7 +124,9 @@ if args.joint_plan:
     if args.spoon != plan_spoon:
         parser.error(f'{args.joint_plan.name} holds {plan_spoon} joints, --spoon is {args.spoon}; for another spoon '
                      f'pass the plan\'s marker CSV as --trajectory so IK plans that spoon')
-args.spoon = args.spoon or 'v1'
+args.spoon = args.spoon or 'v3'
+if args.food_volume is not None and args.food_volume <= 0:
+    args.food_volume = None                            # --food-volume 0: the --food-size cube
 JOINT_INPUT = bool(args.joint_plan or args.joints)   # absolute joints, no IK
 phase_timings = []
 def report_phase(name, started):
@@ -148,9 +154,13 @@ if args.joint_plan or args.joints:
         trajectory_times, q_plan, trajectory = sk.load_joint_plan(TRAJ_SOURCE)
     else:
         import scooping_io as sio
-        from trajectory_smoothing import smooth_start
+        from trajectory_smoothing import smooth_start, start_speed, starts_at_rest
         TRAJ_SOURCE = args.joints.resolve()
         trajectory_times, q_left, q_right, _ = sio.read_joint_csv(TRAJ_SOURCE)
+        if not starts_at_rest(trajectory_times, np.c_[q_left, q_right]) and args.blend_window <= 0:
+            print(f"[Plan] {TRAJ_SOURCE.name} starts moving ({start_speed(trajectory_times, np.c_[q_left, q_right]):.2f} "
+                  "rad/s); the real robot replays it with a 0.3 s smooth start (--blend-window 0.3 to simulate that)",
+                  flush=True)
         trajectory_times, arms = smooth_start(trajectory_times, np.c_[q_left, q_right], args.blend_window,
                                               args.blend_duration)
         q_plan = np.tile(ss.SEED_Q, (len(trajectory_times), 1))       # fingers as in the 2026-11-06 sim plans
@@ -166,9 +176,8 @@ if args.joint_plan or args.joints:
     plan_metrics = None
     print(f"[Plan] joint plan {TRAJ_SOURCE.name}: replaying 0-{trajectory_times[-1]:.2f} s as planned (no IK)", flush=True)
 else:
-    # sk.load_trajectory reads sk.TRAJ_CSV; point it at the chosen CSV for this process only.
-    TRAJ_SOURCE = sk.TRAJ_CSV = args.trajectory.resolve()
-    trajectory_times, trajectory = sk.mapped_targets(SCOOPING_POINT)
+    TRAJ_SOURCE = args.trajectory.resolve()
+    trajectory_times, trajectory = sk.mapped_targets(SCOOPING_POINT, trajectory=sk.load_trajectory(TRAJ_SOURCE))
     # The corrected CSV was validated in full; task_frames would trim it early.
     task_end = sk.task_frames(trajectory) if args.trim_after_exit else len(trajectory)
     if args.max_frames is not None:

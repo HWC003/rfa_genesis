@@ -3,6 +3,9 @@ Exploration into Genesis Simulation for Robot Assisted Feeding (RAF) Application
 
 Diagnostic runs, placement searches and replay comparisons: [dated sessions](data/diagnostics/README.md).
 
+From raw human demos to robot joint CSVs and policy data (calibrate, ingest, plan, validate, export):
+[`docs/scooping_pipeline/README.md`](docs/scooping_pipeline/README.md).
+
 ## Scooping replay: `scripts/oa_pure_scooping.py`
 
 Replays one scoop on the OpenArm in Genesis, with the bowl holder already held in the left gripper and the spoon on
@@ -17,29 +20,38 @@ Scene construction is in `scripts/scooping_scene.py`, IK planning in `scripts/sc
 food/scoop metrics in `scripts/scooping_metrics.py`.
 
 ### Typical commands
-Run from the repository root. The soybean trajectories are in
+Run from the repository root. Since 2026-11-13 the defaults are the validated soybean-pudding setup: spoon v3,
+soybean 0017 (`sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv`) at `0.22 -0.04 0.44`, food `56.51`, rho 960,
+mu 0.01, gamma 0.01, gap 0.030, hold 2 s, clearance abort −30 mm. The soybean marker trajectories are in
 [`data/trajectory/sim_ready_trajs/`](data/trajectory/sim_ready_trajs/README.md); its `manifest.csv` gives each
 recording's file, `--scooping-point` and `--food-volume`.
 
 Viewer, rigid only (no food):
 ```bash
-python scripts/oa_pure_scooping.py --spoon v3 \
-  --trajectory data/trajectory/sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv \
-  --scooping-point 0.22 -0.04 0.44 --no-liquid --hold 1
+python scripts/oa_pure_scooping.py --no-liquid --hold 1
 ```
 
-Viewer with food and scoop evaluation (the validated soybean pudding settings):
+Viewer with food and scoop evaluation (soybean 0017; the same as spelling out every default):
 ```bash
-GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_pure_scooping.py --spoon v3 \
-  --trajectory data/trajectory/sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv \
-  --scooping-point 0.22 -0.04 0.44 --hold 2 --food-volume 56.51 \
-  --sph-rho 960 --sph-mu 0.01 --sph-gamma 0.01 --food-gap 0.030 \
-  --gate-clearance-mm -30 --evaluate --diagnostics sim_runs/0017
+GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_pure_scooping.py --evaluate --diagnostics sim_runs/0017
+# another recording: --trajectory <sim_ready csv> --scooping-point <manifest> --food-volume <manifest>
 ```
+
+Robot joint CSV (no IK; the file the real robot replays), with food and evaluation:
+```bash
+GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_pure_scooping.py \
+  --joints data/trajectory/sb_robot_trajs/v2/sb_traj_0001.csv --food-volume 144.12 --evaluate --diagnostics <dir>
+```
+Pipeline plans already start at rest. The v1 / v2 CSVs start mid-motion; add `--blend-window 0.3` to simulate the
+robot's smooth start (the v2 manifest values were simulated without it).
+
+The green-bean defaults used before 2026-11-13 are `--spoon v1 --trajectory
+data/trajectory/real_trajs/gb_0017_gen_frame_cropped_corrected.csv --scooping-point 0.34 -0.13 0.43 --sph-rho 1000
+--hold 0 --gate-clearance-mm -2 --food-volume 0`.
 
 Headless jam check (rigid, CPU), as the batch scripts run it:
 ```bash
-python scripts/oa_pure_scooping.py --spoon v3 --trajectory <csv> --scooping-point 0.22 -0.04 0.44 \
+python scripts/oa_pure_scooping.py --trajectory <csv> --scooping-point 0.22 -0.04 0.44 \
   --headless --no-liquid --backend cpu --hold 1 --diagnostics <dir>
 ```
 A run passes the jam check when the peak contact in `dense_contacts.csv` is under 10 N and stays above 5 N for less
@@ -51,27 +63,30 @@ than 50 ms.
 
 | Argument | Default | What it does |
 |---|---|---|
-| `--trajectory CSV` | green-bean 0017¹ | Marker trajectory (bowl and spoon markers over time), turned into joints by IK |
+| `--trajectory CSV` | soybean 0017¹ | Marker trajectory (bowl and spoon markers over time), turned into joints by IK |
 | `--joint-plan NPZ` | none | Precomputed joint plan (`times`, `q`). Replaces `--trajectory` and IK; a CSV with the same name supplies the markers for recording |
-| `--scooping-point X Y Z` | `0.34 -0.13 0.43` | Where the bowl centre at the first frame is placed (m, world). Pure translation of the whole trajectory. The soybean batch uses `0.22 -0.04 0.44`. Ignored with `--joint-plan` |
-| `--spoon {v1..v5}` | `v1` | Spoon attachment. v1: original, in line with joint 7. v2: CAD attachment, perpendicular to joint 7. **v3: v2 3.14 mm further from the joint-7 axis (the one used for the soybean work).** v4 / v5: v3 turned +90° / −90° about the spoon axis (dish facing inward / outward). The markers sit in the same place relative to the dish for every version, so any marker CSV runs with any spoon |
+| `--joints CSV` | none | Robot joint CSV (`sb_robot_trajs` / pipeline format: `time_from_start_s` + 7 left + 7 right joints, rad; columns read by name). Replayed as is, no IK. Replaces `oa_joint_replay.py` |
+| `--blend-window S` / `--blend-duration S` | `0` / `0.7` | `--joints`: retime the first S seconds from rest as the real robot does for CSVs that start moving (`trajectory_smoothing.py`; 0.3 there) |
+| `--scooping-point X Y Z` | `0.22 -0.04 0.44` | Where the bowl centre at the first frame is placed (m, world). Pure translation of the whole trajectory. Ignored with `--joint-plan` / `--joints` |
+| `--spoon {v1..v5}` | `v3` | Spoon attachment (a `--joint-plan` with a stored spoon must match it; joint CSVs must be joints of this spoon). v1: original, in line with joint 7. v2: CAD attachment, perpendicular to joint 7. **v3: v2 3.14 mm further from the joint-7 axis (the one used for the soybean work).** v4 / v5: v3 turned +90° / −90° about the spoon axis (dish facing inward / outward). The markers sit in the same place relative to the dish for every version, so any marker CSV runs with any spoon |
 | `--continuity-weight W` | `0.012` | How strongly the IK prefers joints close to the previous frame's (prevents branch jumps) |
 | `--joint-margin-deg D` | `5` | The planner keeps every joint at least this far inside its limit (deg) |
 | `--trim-after-exit` | off | End the replay once the spoon has lifted clear of the bowl (for recordings that then move out of reach) |
 | `--weld-bowl` | off | Weld the left wrist to the world at the first pose (stationary bowl) |
 
-¹ `data/trajectory/real_trajs/gb_0017_gen_frame_cropped_corrected.csv`, the corrected cropped green-bean scoop.
+¹ `data/trajectory/sim_ready_trajs/sb_0017_cal_x1.6_yaw180.csv`. Before 2026-11-13:
+`data/trajectory/real_trajs/gb_0017_gen_frame_cropped_corrected.csv` (green bean, `--spoon v1`).
 
 **Food (SPH liquid)**
 
 | Argument | Default | What it does |
 |---|---|---|
 | `--no-liquid` | off | No food: rigid robot and bowl only. Used for jam checks; changes the physics |
-| `--food-volume ML` | none | Food amount. The runner places `volume / (0.8 × particle_size³)` particles (Genesis's particle volume). The settled pool is smaller: 0.1275 mL per particle at 6 mm, so **pass V_real / 0.1275 × 0.1728** (e.g. 41.7 mL → `56.51`, 83.3 → `112.84`, 105.2 → `142.56`) |
-| `--food-size M` | `0.06` | Edge of the food cube (m) when `--food-volume` is not given |
+| `--food-volume ML` | `56.51` | Food amount (default: soybean 0017, 41.7 mL real; `0` = use `--food-size`). The runner places `volume / (0.8 × particle_size³)` particles (Genesis's particle volume). The settled pool is smaller: 0.1275 mL per particle at 6 mm, so **pass V_real / 0.1275 × 0.1728**, rounded to whole particles (`scooping_pipeline.food_volume_arg`; e.g. 41.7 mL → `56.51`, 83.3 → `112.84`, 105.2 → `142.56`) |
+| `--food-size M` | `0.06` | Edge of the food cube (m) with `--food-volume 0` |
 | `--food-gap M` | `0.03` | Height of the food cube's bottom above the bowl rim centre when it is dropped (m) |
 | `--particle-size M` | `0.006` | SPH particle size (m). Calibration and validation were done at 6 mm; 3 mm behaves like a stickier food with the same μ / γ (2026-11-02 particle_size_3mm) |
-| `--sph-rho` | `1000` | Food density (kg/m³). Soybean pudding: `960` |
+| `--sph-rho` | `960` | Food density (kg/m³; soybean pudding; Genesis default 1000) |
 | `--sph-mu` | `0.01` | Viscosity. `0.01` matches the soybean scoops at 41.7–105 mL (2026-10-26 sph_param_validation) |
 | `--sph-gamma` | `0.01` | Surface tension / cohesion |
 | `--settle-time S` | `2.0` | Seconds the first pose is held while the food settles |
@@ -83,8 +98,8 @@ than 50 ms.
 |---|---|---|
 | `--diagnostics DIR` | none | Write CSVs, plots and timings to this folder |
 | `--evaluate` | off | Food/scoop metrics every 20 ms and the success test. Needs food and `--diagnostics` |
-| `--gate-clearance-mm MM` | `-2` | With `--evaluate`, abort if the spoon-bowl clearance drops below this. Use `-30` for trajectories that scrape the bowl (the soybean ones). A 30 N contact abort always applies |
-| `--hold S` | `0` | Seconds the final pose is held after the replay (the soybean runs use 2 with food, 1 without) |
+| `--gate-clearance-mm MM` | `-30` | With `--evaluate`, abort if the spoon-bowl clearance drops below this (`-30` for the soybean trajectories, which scrape the bowl; the green-bean runs used `-2`). A 30 N contact abort always applies |
+| `--hold S` | `2` | Seconds the final pose is held after the replay (the soybean runs use 2 with food, 1 without) |
 | `--submerged-window T0 T1` | none | Times when the dish is submerged, for the submerged-contact metric |
 | `--render-final` | off | Save `final.png` (spoon at the end) and `pool_t0.png` (bowl at t = 0). Needs `--diagnostics` |
 | `--max-frames N` | none | Stop after N frames (smoke test) |

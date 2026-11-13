@@ -9,9 +9,11 @@ It does not send action goals or move hardware.
 --execute: both arms -> START_POSE; right arm -> CSV start; wait 2 s; left gripper
 quick open, hold 3 s, quick close; left arm -> CSV start; both arms replay the CSV together.
 
-Smooth start: the joint CSVs start mid-motion (up to ~6 rad/s). The first --blend-window s (default 0.3) are
-retimed over --blend-duration s (default 0.7) with a quintic time scaling (trajectory_smoothing.py): same
-joint path, starting from rest. --blend-window 0 replays the CSV unchanged.
+Smooth start: the sb_robot_trajs v1 / v2 CSVs start mid-motion (up to ~6 rad/s). Their first --blend-window s
+(0.3) are retimed over --blend-duration s (default 0.7) with a quintic time scaling (trajectory_smoothing.py): same
+joint path, starting from rest. CSVs from scooping_pipeline.py already start at rest (the ramp is in the file) and
+are replayed unchanged. Default --blend-window auto: 0 when the CSV's first step is below
+trajectory_smoothing.REST_SPEED, else 0.3. --blend-window 0 replays any CSV unchanged.
 
 Payload: /left_payload_attached (std_msgs/Bool, transient local) is published False before the gripper opens
 and True after it closes on the bowl, so the feeding bringup's gravity compensation carries the bowl.
@@ -42,7 +44,7 @@ from control_msgs.action import FollowJointTrajectory
 from control_msgs.msg import JointTolerance
 from action_msgs.msg import GoalStatus
 
-from trajectory_smoothing import smooth_start, peak_velocity
+from trajectory_smoothing import auto_window, peak_velocity, smooth_start, start_speed
 
 # Intermediate start pose (rad), joints 1-7, reached before moving to the CSV start.
 START_POSE = {
@@ -194,6 +196,12 @@ class ScoopingReplay(Node):
         """Retime the first `window` s of the CSV to start from rest (trajectory_smoothing.smooth_start)."""
         times = np.array([float(row["time_from_start_s"]) for row in rows])
         q = np.array([[float(row[name]) for name in ARM_JOINTS] for row in rows])
+        if window is None:
+            window = auto_window(times, q)
+            self.get_logger().info(
+                f"Smooth start auto: first-step speed {start_speed(times, q):.3f} rad/s -> "
+                + ("the CSV starts at rest, replayed unchanged" if window == 0 else f"blend window {window:.3f} s")
+            )
         new_times, new_q = smooth_start(times, q, window, duration)
         if window > 0:
             self.get_logger().info(
@@ -563,8 +571,9 @@ def main():
         help="Final position tolerance (rad) for the START_POSE and approach moves (default: 0.03)",
     )
     parser.add_argument(
-        "--blend-window", type=float, default=0.3,
-        help="Seconds at the CSV start retimed to start from rest; 0 = replay the CSV unchanged (default: 0.3)",
+        "--blend-window", type=lambda v: None if v == "auto" else float(v), default=None,
+        help="Seconds at the CSV start retimed to start from rest; 0 = replay the CSV unchanged; "
+             "auto (default) = 0 for a CSV that already starts at rest (scooping_pipeline plans), else 0.3",
     )
     parser.add_argument(
         "--blend-duration", type=float, default=0.7,

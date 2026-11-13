@@ -9,15 +9,18 @@ relative to it. Edits:
   smooth_bowl      bowl: flat demos one level pose; tilted demos one min-jerk tilt to the mean scoop pose, then held
                    (optional tip-back after the scoop)
   spin_to          bowl turned about its own axis to a given spin
+  floor_lift       spoon raised along the bowl normal e (holder +y) where the planned clearance is below a margin
+                   (correction-ladder rung for floor jams)
 
 Migrated unchanged from the diagnostics:
   turn_and_place   2026-10-21/soybean_batch/tools/prepare.py::turned_markers + scooping_kinematics.mapped_targets
                    (on poses instead of markers)
   wall_margin      2026-10-21/soybean_batch/tools/wall_margin.py::correct_wall
+  floor_lift       2026-11-06/bowl_smoothing_and_spin/tools/floor_lift.py::lift_profile
   the rest         2026-11-06/bowl_smoothing_and_spin/tools/replan_bowl.py and bowl_common.py
 """
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, maximum_filter1d
 from scipy.signal import butter, filtfilt
 from scipy.spatial.transform import Rotation, Slerp
 
@@ -214,3 +217,33 @@ def smooth_relative(t, X, hz=REL_LOWPASS_HZ):
     b, a = butter(2, hz / (0.5 / np.median(np.diff(t))))
     x = filtfilt(b, a, x, axis=0)
     return pose_stack(x[:, :3], R0 * Rotation.from_rotvec(x[:, 3:]))
+
+
+# ---------------------------------------------------------------- floor lift ---
+LIFT_ENV_S = 0.15          # running-max half window of the lift envelope (s)
+LIFT_LOWPASS_HZ = 3.0
+
+
+def clearance_mm(geom, T, R, spoon_tool):
+    """Planned spoon-bowl clearance (ScoopGeometry.gap, mm) for holder poses T and right-wrist poses R."""
+    return np.array([geom.gap(B, W @ spoon_tool) for B, W in zip(T, R)]) * 1000
+
+
+def floor_lift(geom, t, T, R, spoon_tool, lift_mm, iters=6):
+    """Right-wrist targets R raised along the bowl normal (holder +y of T) wherever the clearance is below lift_mm.
+
+    needed(t) = max(0, lift_mm - clearance(t)); envelope = running max over +-LIFT_ENV_S, then a 3 Hz zero-phase
+    low-pass (smooth ramps in and out); repeated until the clearance is >= lift_mm everywhere (the floor is not
+    exactly normal to e everywhere). Returns (lift (mm, per frame), lifted R, clearance after (mm))."""
+    dt = np.diff(t).mean()
+    b, a = butter(2, LIFT_LOWPASS_HZ / (0.5 / dt))
+    L = np.zeros(len(t))
+    for _ in range(iters):
+        Rl = R.copy(); Rl[:, :3, 3] += (L / 1000)[:, None] * T[:, :3, 1]
+        c = clearance_mm(geom, T, Rl, spoon_tool)
+        need = np.maximum(0, lift_mm - c)
+        if need.max() < .05:
+            break
+        env = maximum_filter1d(need, size=2 * int(round(LIFT_ENV_S / dt)) + 1)
+        L += np.maximum(filtfilt(b, a, env), 0) * 1.2
+    return L, Rl, c
