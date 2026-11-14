@@ -8,6 +8,9 @@ One command per stage takes a session of human scooping demos (Qualisys marker r
 
 `make_figure.py` draws `pipeline.png`. A dashed border marks a part that does not exist yet.
 
+Which file calls which, what is new / merged / legacy, and how to run the new trajectories in simulation:
+[`docs/pipeline_architecture/README.md`](../pipeline_architecture/README.md).
+
 Implemented on branch `pipeline-migration` (2026-11-12/13), following the plan in
 `data/diagnostics/2026-11-12/pipeline_proposal/README.md` §5, steps 1–5. Checks against the existing outputs:
 `data/diagnostics/2026-11-12/migration_checks/` (steps 1–3) and `data/diagnostics/2026-11-13/migration_steps_4_5/`
@@ -140,8 +143,9 @@ For each take, rung by rung:
 | `jam` | reject | peak contact < 10 N, and > 5 N for < 50 ms | CLAUDE.md |
 | `food_kept` | reject | at least one particle on the spoon at the end | v2 selection |
 | `end_above_rim` | reject | spoon above the rim plane at the end, in the bowl frame | v2 selection |
+| `kept_vs_real` | warn | simulated kept volume ≥ 50 % of the weighed real scoop (`kept_warn_frac`) | user, 2026-11-14: small scoops are a known acquisition limit; decide after a real-robot replay. Soybean session: 0020, 0023, 0024 |
 
-- Kept volume is reported but not gated: one GPU run has about ±1 mL of run-to-run noise.
+- Kept volume is otherwise not gated: one GPU run has about ±1 mL of run-to-run noise.
 - Default ladder for the soybean session: floor lift 1.5 mm, then 5 mm. These are the 2026-11-06 fixes for the two
   floor jams (0017 needs 1.5 mm, 0003 needs 5 mm). They keep about 30 % less food.
 - Any plan setting can be a rung, e.g. `{time_scale: 2.0}`, `{spoon_margin: calwall}` or `{placement: [...]}`.

@@ -14,7 +14,10 @@ Food-simulation checks (oa_pure_scooping.py --joints --evaluate: scoop_summary.j
   jam                 peak contact < 10 N and > 5 N for < 50 ms (CLAUDE.md)                               reject
   food_kept           food on the spoon at the end (retained_same_ids > 0)                                reject
   end_above_rim       at the end the spoon is above the rim plane in the bowl frame (plan)                 reject
-Kept volume is reported, not gated: one GPU run has about +-1 mL of noise (2026-11-12 migration_checks step 3).
+  kept_vs_real        sim kept volume >= kept_warn_frac (50 %) of the weighed real scoop (metadata)       warn
+                      (user decision 2026-11-14: small scoops are a known food-acquisition limit, e.g. 0020 at
+                      r2 keeps 2.0 of 9.4 mL; decide pass / fail only after a real-robot replay)
+Kept volume is otherwise not gated: one GPU run has about +-1 mL of noise (2026-11-12 migration_checks step 3).
 
 decide() -> ('accept' | 'reject', reasons, warnings). Thresholds: GATE_DEFAULTS, overridable in session.yaml gate:.
 """
@@ -27,7 +30,7 @@ import numpy as np
 from trajectory_smoothing import REST_SPEED
 
 GATE_DEFAULTS = dict(jam_peak_N=10.0, jam_above_N=5.0, jam_max_ms=50.0, entry_warn_mm=4.0, rest_speed=REST_SPEED,
-                     min_kept_particles=1, end_above_rim_mm=0.0)
+                     min_kept_particles=1, end_above_rim_mm=0.0, kept_warn_frac=0.5)
 SIM_DT = 0.004                                     # scooping_scene.DT: one dense_contacts row per physics step
 
 
@@ -59,19 +62,24 @@ def jam(dense_contacts_csv, g=GATE_DEFAULTS):
     return float(f.max()), ms, bool(f.max() < g['jam_peak_N'] and ms < g['jam_max_ms'])
 
 
-def sim_checks(sim_dir, end_above_rim_mm, g=GATE_DEFAULTS):
-    """sim_dir: oa_pure_scooping --diagnostics folder of an --evaluate run."""
+def sim_checks(sim_dir, end_above_rim_mm, g=GATE_DEFAULTS, real_ml=None):
+    """sim_dir: oa_pure_scooping --diagnostics folder of an --evaluate run; real_ml: weighed real scoop (mL) or None."""
     sim_dir = Path(sim_dir)
     s = json.loads((sim_dir / 'scoop_summary.json').read_text())
     peak, ms, ok = jam(sim_dir / 'dense_contacts.csv', g)
-    return dict(
+    c = dict(
         not_aborted=check(s.get('aborted') or 'no', not s.get('aborted'), 'no abort'),
         jam=check(dict(peak_N=round(peak, 2), ms_above=round(ms, 1)), ok,
                   f"peak < {g['jam_peak_N']} N, > {g['jam_above_N']} N for < {g['jam_max_ms']} ms"),
         food_kept=check(s['retained_same_ids'], s['retained_same_ids'] >= g['min_kept_particles'],
                         f">= {g['min_kept_particles']} particles"),
         end_above_rim=check(end_above_rim_mm, end_above_rim_mm > g['end_above_rim_mm'], f"> {g['end_above_rim_mm']} mm"),
-    ), dict(kept_ml=round(s['retained_volume_mL'], 2), kept_particles=s['retained_same_ids'],
+    )
+    if real_ml:
+        lim = g['kept_warn_frac'] * real_ml
+        c['kept_vs_real'] = check(round(s['retained_volume_mL'], 2), s['retained_volume_mL'] >= lim,
+                                  f">= {lim:.1f} mL ({g['kept_warn_frac']:.0%} of the real {real_ml} mL)", 'warn')
+    return c, dict(kept_ml=round(s['retained_volume_mL'], 2), kept_particles=s['retained_same_ids'],
             peak_contact_N=round(s['peak_rigid_contact_N'], 2), peak_contact_every_step_N=round(peak, 2),
             ms_above_5N=round(ms, 1), sim_failed_checks=s.get('failed_checks'))
 

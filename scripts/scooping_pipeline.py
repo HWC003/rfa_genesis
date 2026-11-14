@@ -343,7 +343,8 @@ def cmd_validate(cfg, out, args):
                 r.update(decision='reject (sim did not finish)', reasons=[f'see {d / "run.log"}'], warnings=[])
                 continue
             end_above = json.loads(plan_path(out, t, rung_).with_suffix('.json').read_text())['metrics']['end_spoon_above_rim_mm']
-            checks, summ = sg.sim_checks(d, end_above, g)
+            real = meta.get(t, {}).get('real_scooped_ml')
+            checks, summ = sg.sim_checks(d, end_above, g, float(real) if real else None)
             r.update(sim=str(d.relative_to(out)), sim_checks=checks, sim_summary=summ)
             decision, reasons, warnings = sg.decide({**r['plan_checks'], **checks})
             r.update(decision=decision, reasons=reasons, warnings=warnings)
