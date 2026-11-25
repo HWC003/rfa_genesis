@@ -14,9 +14,9 @@ import trimesh
 from pxr import Gf, Usd, UsdGeom, UsdPhysics, Vt
 
 
-WORKSPACE = Path(__file__).resolve().parents[2]
+WORKSPACE = Path(__file__).resolve().parents[3]
 SOURCE = WORKSPACE / "openarm_mujoco/v2/assets/attachments"
-OUTPUT = Path(__file__).resolve().parents[1] / "assets/props"
+OUTPUT = Path(__file__).resolve().parents[2] / "assets/props"
 
 
 def fit_sphere(vertices, rng):

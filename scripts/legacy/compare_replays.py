@@ -11,6 +11,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # scripts/ (moved to scripts/legacy/)
 from scooping_kinematics import ArmKinematics, ROOT
 
 DIAG = ROOT / 'data/diagnostics/2026-09-23/runs'

@@ -312,7 +312,7 @@ def marker_distance_stats(df, marker_names):
     return stats_df
 
 def main():
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     input_csv = os.path.join(project_root, "data", "trajectory", "real_trajs", "green_bean0017_cropped.csv")
     output_csv = os.path.join(project_root, "data", "trajectory", "real_trajs", "gb_0017_gen_frame_cropped.csv")
 

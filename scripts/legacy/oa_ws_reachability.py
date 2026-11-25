@@ -50,7 +50,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers the '3d' proje
 
 import genesis as gs
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 DEFAULT_USD = ASSETS_DIR / "openarm_bimanual" / "openarm_pedestal.usd"
 
 # DOF layout, matching oa_baseline.py's convention for this pedestal:

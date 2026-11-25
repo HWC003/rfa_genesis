@@ -30,7 +30,7 @@ def report_phase(name, started):
     phase_timings.append((name, elapsed))
     print(f'[Timing] {name}: {elapsed:.3f} s', flush=True)
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 # Holder is a separate free body here; the robot USD carries only the spoon.
 OPENARM_USD = ASSETS_DIR / "openarm_bimanual" / "openarm_spoon_w_o_markers.usd"
 BOWL_USD = ASSETS_DIR / "props" / "Bowl_holder_w_o_marker.usd"

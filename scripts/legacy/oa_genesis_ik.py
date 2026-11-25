@@ -8,9 +8,9 @@ import genesis as gs
 from genesis.ext.pyrender.overlay import ImGuiOverlayPlugin
 from genesis.utils.path_planning import RRTConnect
 
-ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets"
 OPENARM_USD = ASSETS_DIR / "openarm_bimanual" / "openarm_spoon_w_o_markers.usd"
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 TRAJ_CSV = DATA_DIR / "trajectory" / "real_trajs" / "green_bean0017.csv"
 
 # Table mesh + its existing pose put the tabletop at world Z = 0.30 m.

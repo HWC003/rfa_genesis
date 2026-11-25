@@ -68,7 +68,7 @@ def main():
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path(__file__).resolve().parent.parent / "assets" / "props" / "table.usd",
+        default=Path(__file__).resolve().parents[2] / "assets" / "props" / "table.usd",
         help="Output .usd path",
     )
     args = parser.parse_args()

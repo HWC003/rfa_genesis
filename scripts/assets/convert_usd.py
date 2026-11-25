@@ -1,6 +1,6 @@
 """
 EXAMPLE USAGE:
-/home/hauwen/isaac_ws/IsaacLab/isaaclab.sh -p /home/hauwen/oa_ros2_ws/src/rfa_genesis/scripts/convert_usd.py \
+/home/hauwen/isaac_ws/IsaacLab/isaaclab.sh -p /home/hauwen/oa_ros2_ws/src/rfa_genesis/scripts/assets/convert_usd.py \
 /home/hauwen/oa_ros2_ws/src/rfa_genesis/assets/openarm_bimanual/configuration/openarm_pedestal_base.usd \
 /home/hauwen/oa_ros2_ws/src/rfa_genesis/assets/openarm_bimanual/configuration/openarm_pedestal_base.usda
 """
