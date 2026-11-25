@@ -17,6 +17,11 @@ Food-simulation checks (oa_pure_scooping.py --joints --evaluate: scoop_summary.j
   kept_vs_real        sim kept volume >= kept_warn_frac (50 %) of the weighed real scoop (metadata)       warn
                       (user decision 2026-11-14: small scoops are a known food-acquisition limit, e.g. 0020 at
                       r2 keeps 2.0 of 9.4 mL; decide pass / fail only after a real-robot replay)
+Rigid-only check (the same CSV replayed with --no-liquid on the CPU; accepted plans only):
+  rigid_jam           jam rule above without food                                                         warn
+                      (2026-11-25 rigid_only_contact: the food's weight makes the sim bowl wrist sag ~2 mm away from
+                      the spoon, so a food run can hide a small floor margin, e.g. 0017 r1 / 0005 r0. User decision
+                      2026-11-25: warning only; v1 / v2 replays on the robot showed no excessive scooping contact)
 Kept volume is otherwise not gated: one GPU run has about +-1 mL of noise (2026-11-12 migration_checks step 3).
 
 decide() -> ('accept' | 'reject', reasons, warnings). Thresholds: GATE_DEFAULTS, overridable in session.yaml gate:.
@@ -30,7 +35,7 @@ import numpy as np
 from trajectory_smoothing import REST_SPEED
 
 GATE_DEFAULTS = dict(jam_peak_N=10.0, jam_above_N=5.0, jam_max_ms=50.0, entry_warn_mm=4.0, rest_speed=REST_SPEED,
-                     min_kept_particles=1, end_above_rim_mm=0.0, kept_warn_frac=0.5)
+                     min_kept_particles=1, end_above_rim_mm=0.0, kept_warn_frac=0.5, rigid_check=True)
 SIM_DT = 0.004                                     # scooping_scene.DT: one dense_contacts row per physics step
 
 
@@ -82,6 +87,14 @@ def sim_checks(sim_dir, end_above_rim_mm, g=GATE_DEFAULTS, real_ml=None):
     return c, dict(kept_ml=round(s['retained_volume_mL'], 2), kept_particles=s['retained_same_ids'],
             peak_contact_N=round(s['peak_rigid_contact_N'], 2), peak_contact_every_step_N=round(peak, 2),
             ms_above_5N=round(ms, 1), sim_failed_checks=s.get('failed_checks'))
+
+
+def rigid_checks(sim_dir, g=GATE_DEFAULTS):
+    """sim_dir: oa_pure_scooping --no-liquid --diagnostics folder. Jam rule as a warning; (checks, summary)."""
+    peak, ms, ok = jam(Path(sim_dir) / 'dense_contacts.csv', g)
+    c = dict(rigid_jam=check(dict(peak_N=round(peak, 2), ms_above=round(ms, 1)), ok,
+                             f"peak < {g['jam_peak_N']} N, > {g['jam_above_N']} N for < {g['jam_max_ms']} ms", 'warn'))
+    return c, dict(rigid_peak_contact_N=round(peak, 2), rigid_ms_above_5N=round(ms, 1))
 
 
 def decide(checks):

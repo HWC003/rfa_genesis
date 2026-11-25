@@ -43,7 +43,8 @@ Stages (repository root, genesis env):
 
 validate runs the ladder in rounds: plan rung k for the takes not yet accepted, check the plan, simulate it
 (oa_pure_scooping.py --joints --evaluate, at most 3 GPU runs at once), check the result; a take that fails goes to
-rung k + 1. Existing plans and simulations are reused, never overwritten (plan / ingest / calibrate / export refuse
+rung k + 1. An accepted plan is also replayed rigid-only (--no-liquid, CPU, sim/<take>/r<k>_rigid/): a jam there is a
+warning (rigid_jam), not a reject; gate: {rigid_check: false} turns it off. Existing plans and simulations are reused, never overwritten (plan / ingest / calibrate / export refuse
 without --overwrite); gate files are recomputed from them on every validate.
 """
 import argparse
@@ -64,6 +65,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = Path(__file__).resolve().parent
 PARTICLE_ML_SETTLED, PARTICLE_ML_SIM = 0.1275, 0.1728      # 6 mm particle: settled real volume / Genesis volume (README)
 SIM_JOBS = 3                                              # food runs on the GPU: at most 3 at once (CLAUDE.md)
+RIGID_JOBS = 4                                            # rigid-only runs on the CPU (warning check, scooping_gate)
 
 
 def load_session(path):
@@ -292,6 +294,20 @@ def run_sim(job):
     return f'{take} r{rung} sim exit {r.returncode}'
 
 
+def run_rigid(job):
+    """One rigid-only replay (oa_pure_scooping.py --joints --no-liquid, CPU; skipped if its summary.json exists)."""
+    take, rung, csv_path, dest, spoon = job
+    if (dest / 'summary.json').exists():
+        return f'{take} r{rung} rigid exists'
+    dest.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, str(SCRIPTS / 'oa_pure_scooping.py'), '--joints', str(csv_path), '--spoon', spoon,
+           '--no-liquid', '--backend', 'cpu', '--headless', '--diagnostics', str(dest)]
+    (dest / 'command.txt').write_text(' '.join(cmd) + '\n')
+    with (dest / 'run.log').open('w') as log:
+        r = subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=dict(os.environ, OMP_NUM_THREADS='1'))
+    return f'{take} r{rung} rigid exit {r.returncode}'
+
+
 def gate_plan(out, take, rung, g):
     import scooping_gate as sg
     import scooping_io as sio
@@ -350,6 +366,20 @@ def cmd_validate(cfg, out, args):
             r.update(decision=decision, reasons=reasons, warnings=warnings)
             if decision == 'accept':
                 state[t].update(status='accept', accepted_rung=rung_)
+        rigid = [(t, rung_, plan_path(out, t, rung_), sim_dir(out, t, rung_).with_name(f'r{rung_}_rigid'), cfg['spoon'])
+                 for t, rung_, *_ in sims if g.get('rigid_check') and state[t]['rungs'][-1].get('decision') == 'accept']
+        with ThreadPoolExecutor(RIGID_JOBS) as ex:
+            for msg in ex.map(run_rigid, rigid):
+                print(msg, flush=True)
+        for t, rung_, _, d, _ in rigid:
+            r = state[t]['rungs'][-1]
+            if not (d / 'summary.json').exists():
+                r['warnings'].append(f'rigid_check: run did not finish (see {d / "run.log"})')
+                continue
+            checks, summ = sg.rigid_checks(d, g)
+            r.update(rigid_sim=str(d.relative_to(out)), rigid_checks=checks)
+            r['sim_summary'].update(summ)
+            r['warnings'] += sg.decide(checks)[2]
         for t in todo:
             if state[t]['status'] == 'pending' and rung == n_rungs - 1:
                 state[t]['status'] = 'reject'
