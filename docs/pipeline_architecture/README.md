@@ -1,6 +1,6 @@
 # Post-processing architecture: what links to what
 
-This page is the map of the scooping post-processing code on branch `pipeline-migration` (2026-11-14). It shows
+This page is the map of the scooping post-processing code (built on branch `pipeline-migration` 2026-11-12/14, merged into `main` 2026-11-25). It shows
 which file calls which, which parts are new, merged from older code, or legacy, and how to run the new trajectories
 in simulation.
 
@@ -19,6 +19,56 @@ in simulation.
 | **shared** | An existing `scripts/` file the pipeline uses, with no or only small changes |
 | **legacy** | Still in `scripts/` and still runs, but not part of the pipeline |
 | **frozen** | Data produced by the old flow. It is kept as it is, for provenance, and nothing writes to it |
+
+## 0. Simplified overview
+
+One command, `scooping_pipeline.py <stage> SESSION.yaml`. Each box is one chunk of the post-processing, with the
+scripts that do the work. Arrows are the files handed to the next chunk.
+
+```mermaid
+flowchart LR
+  subgraph IN[Inputs, by hand]
+    direction TB
+    i1[real_trajs/*.tsv<br/>QTM markers, 100 Hz]
+    i2[session.yaml<br/>takes, plan, ladder, gate]
+    i3[metadata.csv<br/>food mL per take]
+  end
+  subgraph CAL[1 · Calibrate]
+    c1[scooping_calibration<br/>scooping_io]
+  end
+  subgraph ING[2 · Ingest]
+    g1[scooping_ingest<br/>scooping_io · scooping_metrics<br/>trajectory_diagnostics]
+  end
+  subgraph PLAN[3 · Plan / retarget]
+    p1[scooping_planner]
+    p2[scooping_motion<br/>margin · hold · spin · floor lift]
+    p3[scooping_kinematics<br/>IK]
+    p4[trajectory_smoothing<br/>start ramp]
+    p1 --- p2 & p3 & p4
+  end
+  subgraph VAL[4 · Validate]
+    v1[oa_pure_scooping.py --joints --evaluate<br/>food sim, scooping_scene]
+    v2[scooping_gate<br/>accept / reject]
+    v1 --> v2
+  end
+  subgraph EXP[5 · Export]
+    e1[scooping_pipeline export]
+  end
+  subgraph USE[Consumers]
+    u1[oa_real_scooping_replay.py<br/>real robot]
+    u2[policy training]
+  end
+  i1 --> CAL & ING
+  i2 -.-> CAL & ING & PLAN & VAL & EXP
+  i3 -.-> VAL & EXP
+  CAL -->|calibration.json| ING
+  ING -->|episodes/take.npz| PLAN
+  PLAN -->|plans/take/rk.csv| VAL
+  VAL -->|reject: next ladder rung| PLAN
+  VAL -->|gate.json| EXP
+  EXP -->|robot/sb_traj_take.csv| u1
+  EXP -->|policy/take.npz| u2
+```
 
 ## 1. The two flows side by side
 
@@ -124,14 +174,17 @@ pure numpy. Every other module needs the `genesis` conda env (numpy, scipy, trim
 | `scooping_scene.py` | **shared** | Genesis scene, constants (`DT`, `KP`/`KV`, `SPOONS`), marker templates | — |
 | `trajectory_diagnostics.py` | **shared** | `fit_pose` (Kabsch), `Recorder` | — |
 
-### Legacy (still in `scripts/`, not used by the pipeline)
+### Legacy (moved out of the pipeline folder 2026-11-25, not used by the pipeline)
 
-| File | What it is | Proposed (not done; needs your agreement) |
+| File | What it is | Where |
 |---|---|---|
-| `oa_full_sim.py`, `oa_pick_and_place.py`, `oa_genesis_ik.py`, `oa_ws_reachability.py` | Exploration: grasp / carry the holder, IK tests, workspace | move to `scripts/legacy/` |
-| `feeding_mapping.py` | MuJoCo / green-bean-era marker mapping (now in `scooping_io.world_markers`) | remove |
-| `compare_replays.py` | One-off comparison hard-coded to 2026-09-23 | remove |
-| `convert_usd.py`, `convert_bowl_holders.py`, `make_table_usd.py`, `load_usd_genesis.py` | Asset tools | move to `scripts/assets/` |
+| `oa_full_sim.py`, `oa_pick_and_place.py`, `oa_genesis_ik.py`, `oa_ws_reachability.py` | Exploration: grasp / carry the holder, IK tests, workspace | `scripts/legacy/` |
+| `feeding_mapping.py` | MuJoCo / green-bean-era marker mapping (now in `scooping_io.world_markers`) | `scripts/legacy/` (candidate for removal) |
+| `compare_replays.py` | One-off comparison hard-coded to 2026-09-23 | `scripts/legacy/` (candidate for removal) |
+| `convert_usd.py`, `convert_bowl_holders.py`, `make_table_usd.py`, `load_usd_genesis.py` | Asset tools | `scripts/assets/` |
+
+Their repo-relative paths were updated for the extra folder level; `oa_full_sim.py` and `compare_replays.py` add
+`scripts/` to `sys.path` because they import pipeline modules.
 
 Removed on this branch: `oa_joint_replay.py` (use `oa_pure_scooping.py --joints`).
 
@@ -193,6 +246,13 @@ GS_SPH_RIGID_PRESSURE_PUSH=0 python scripts/oa_pure_scooping.py --joints $E/sb_t
 
 ### 5.2 Rigid-only jam check (no food, CPU)
 
+> **Stricter than the food run (2026-11-25).** On the exported `sb_traj_0017.csv` (floor lift 1.5 mm) this run jams
+> (spoon-bowl peak 106 N from t = 3.84 s) while the gate's food run has 0 N. Cause: the sim spoon arm lags the plan
+> by ~2–3 mm towards the floor, more than the 2 mm planned margin. In the food run the food's weight makes the bowl
+> wrist sag ~2 mm away from the spoon and hides it. With 5 mm floor lift (6.2 mm margin) the rigid run is clean.
+> Details: `data/diagnostics/2026-11-25/rigid_only_contact/README.md` (git-ignored). Since 2026-11-25 `validate` runs
+> this for every accepted plan and reports a jam as the `rigid_jam` warning (not a reject).
+
 ```bash
 python scripts/oa_pure_scooping.py --joints $E/sb_traj_0017.csv --no-liquid --backend cpu --headless \
   --diagnostics sim_runs/new_0017_rigid
@@ -243,15 +303,16 @@ The CSV starts at rest, so it is replayed unchanged. The robot runs the same fil
 |---|---|---|
 | Phase threshold `LOW` | Keep 10 mm | No effect on the robot trajectory: the plan uses only the crop (entry, lift). `low0` / `low1` set the policy phase labels (sweep / slide) and the summary statistics |
 | Rim-entry clearance | Warn, pass regardless | `entry_rim_clearance` is a warning (< 4 mm) |
+| Rigid-only jam (2026-11-25) | Warning only; no extra floor lift, no reject. v1 / v2 robot replays showed no excessive scooping contact | New warning `rigid_jam` (`scooping_gate.rigid_checks`); `validate` replays accepted plans with `--no-liquid` on the CPU (`r<k>_rigid/`) |
 | Small sim scoops | Accept with a warning; decide after a real-robot replay | New warning `kept_vs_real`: sim kept volume < 50 % of the weighed real scoop (`kept_warn_frac`, `scooping_gate.py`) |
 | 0022 | Leave rejected; batch-fix such cases once the larger dataset exists | none |
 | Robot test | Not from this PC | none |
-| Merge to main | Not yet | branch `pipeline-migration` |
+| Merge to main | Done 2026-11-25 | `pipeline-migration` merged into `main` |
 
 ## 7. Not done yet
 
 - RGB / FT sync and recording (migration step 6) and a model-specific policy writer (step 7).
 - `analyse-real`: robot results back into the manifest (`real_robot_tested`) and the ladder.
 - Tracked `data/sessions/` instead of diagnostics folders.
-- Moving the legacy scripts (section 3) to `scripts/legacy/` and `scripts/assets/`.
-- CLAUDE.md still lists `oa_joint_replay.py` and the old defaults. Update it at the merge.
+- ~~Moving the legacy scripts to `scripts/legacy/` and `scripts/assets/`~~ (done 2026-11-25).
+- ~~CLAUDE.md update~~ (done 2026-11-25; CLAUDE.md is not tracked by git yet).

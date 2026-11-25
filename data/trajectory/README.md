@@ -4,7 +4,7 @@
 |---|---|
 | `real_trajs/` | Recorded (Qualisys) feeding demonstrations and their direct mappings to the robot world |
 | `gen_trajs/` | Generated (designed / planned) trajectories |
-| [`sb_robot_trajs/`](sb_robot_trajs/README.md) | Selected successful soybean replays: timed joint commands for both arms, one file per successful recording |
+| [`sb_robot_trajs/`](sb_robot_trajs/README.md) | Selected successful soybean replays: timed joint commands for both arms, one file per successful recording. `v1/` = 2026-10-21 batch, `v2/` = 2026-11-06 bowl hold/spin re-plan |
 | [`sim_ready_trajs/`](sim_ready_trajs/README.md) | The same 21 soybean recordings as marker trajectories for `oa_pure_scooping.py`, with the runner values per recording (copied from the git-ignored diagnostics) |
 | `old_tb_traj/` | Older corrective trajectories, kept for reference |
 
@@ -14,8 +14,8 @@
 |---|---|---|
 | `green_bean0017.csv` / `.tsv` | Raw Qualisys recording (mm) | capture |
 | `green_bean0017_cropped.csv` | The recording cropped to the scoop (crop tool not recorded) | manual |
-| `gb_0017_gen_frame.csv` | Uncropped recording mapped to the robot world: mm→m, (x, y, z) → (−y, x, z), first `Bowl_center` at (0.30, 0, 0.40) | `scripts/feeding_mapping.py` |
-| `gb_0017_gen_frame_cropped.csv` | Same mapping of the cropped recording (600 rows, 5.99 s). `scooping_kinematics.TRAJ_CSV` | `scripts/feeding_mapping.py` |
+| `gb_0017_gen_frame.csv` | Uncropped recording mapped to the robot world: mm→m, (x, y, z) → (−y, x, z), first `Bowl_center` at (0.30, 0, 0.40) | `scripts/legacy/feeding_mapping.py` |
+| `gb_0017_gen_frame_cropped.csv` | Same mapping of the cropped recording (600 rows, 5.99 s). `scooping_kinematics.TRAJ_CSV` | `scripts/legacy/feeding_mapping.py` |
 | `gb_0017_gen_frame_cropped_corrected.csv` | The cropped mapping with the spoon path corrected for spoon–bowl contact and timestamps stretched ×1.6 (9.584 s). Default of `oa_pure_scooping.py` | copied unchanged from `data/diagnostics/2026-09-28/cropped_contact_correction/trajectories/` (see its README) |
 
 ## gen_trajs/

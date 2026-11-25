@@ -11,7 +11,7 @@ One command per stage takes a session of human scooping demos (Qualisys marker r
 Which file calls which, what is new / merged / legacy, and how to run the new trajectories in simulation:
 [`docs/pipeline_architecture/README.md`](../pipeline_architecture/README.md).
 
-Implemented on branch `pipeline-migration` (2026-11-12/13), following the plan in
+Implemented on branch `pipeline-migration` (2026-11-12/13, merged into `main` 2026-11-25), following the plan in
 `data/diagnostics/2026-11-12/pipeline_proposal/README.md` §5, steps 1–5. Checks against the existing outputs:
 `data/diagnostics/2026-11-12/migration_checks/` (steps 1–3) and `data/diagnostics/2026-11-13/migration_steps_4_5/`
 (steps 4–5). Both folders are git-ignored.
@@ -131,6 +131,8 @@ For each take, rung by rung:
    and `--food-volume` from `initial_food_ml`. At most 3 GPU runs at once.
 4. Run the simulation checks.
 5. Accept the take, or try the next rung. When every rung fails, the take is rejected with the reasons.
+6. An accepted plan is also replayed without food (`--no-liquid --backend cpu`, `sim/<take>/r<k>_rigid/`, 4 at once,
+   ~30 s each). A jam there only adds the `rigid_jam` warning. `gate: {rigid_check: false}` turns it off.
 
 `scooping_gate.py`:
 
@@ -143,6 +145,7 @@ For each take, rung by rung:
 | `jam` | reject | peak contact < 10 N, and > 5 N for < 50 ms | CLAUDE.md |
 | `food_kept` | reject | at least one particle on the spoon at the end | v2 selection |
 | `end_above_rim` | reject | spoon above the rim plane at the end, in the bowl frame | v2 selection |
+| `rigid_jam` | warn | the `jam` rule on the rigid-only replay of an accepted plan | 2026-11-25 rigid_only_contact: the food's weight makes the sim bowl wrist sag ~2 mm away from the spoon and can hide a small floor margin (0017 r1, 0005 r0 jam without food). User, 2026-11-25: warning only; v1 / v2 robot replays showed no excessive contact |
 | `kept_vs_real` | warn | simulated kept volume ≥ 50 % of the weighed real scoop (`kept_warn_frac`) | user, 2026-11-14: small scoops are a known acquisition limit; decide after a real-robot replay. Soybean session: 0020, 0023, 0024 |
 
 - Kept volume is otherwise not gated: one GPU run has about ±1 mL of run-to-run noise.
